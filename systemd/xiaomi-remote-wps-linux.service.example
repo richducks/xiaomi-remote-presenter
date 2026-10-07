@@ -1,0 +1,15 @@
+[Unit]
+Description=Xiaomi Remote 2 Pro for WPS (OK->F5, BACK->ESC)
+After=graphical-session.target bluetooth.target
+
+[Service]
+Type=simple
+# install.sh generates a user-specific WorkingDirectory and ExecStart.
+ExecStart=/path/to/venv/bin/python /path/to/remote_hid_filter.py
+Restart=always
+RestartSec=2
+KillSignal=SIGINT
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
