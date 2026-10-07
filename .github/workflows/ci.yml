@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Linux shell and Python
+        run: |
+          bash -n linux/install.sh linux/uninstall.sh linux/diagnose.sh
+          python3 -m py_compile linux/remote_hid_filter.py
+
+      - name: Install Linux test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-evdev python3-pytest
+
+      - name: Run Linux tests
+        run: |
+          cd linux
+          python3 -m pytest -q tests
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell installers
+        shell: powershell
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "windows/install.ps1"), [ref]$null, [ref]$errors
+          ) > $null
+          if ($errors.Count) { $errors | Out-String | Write-Error; exit 1 }
+
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "windows/uninstall.ps1"), [ref]$null, [ref]$errors
+          ) > $null
+          if ($errors.Count) { $errors | Out-String | Write-Error; exit 1 }
+
+      - name: Validate AutoHotkey contract
+        shell: powershell
+        run: |
+          $s = Get-Content windows/xiaomi_remote_presenter.ahk -Raw
+          if ($s -notmatch '#Requires AutoHotkey v2\.0') { exit 1 }
+          if ($s -notmatch 'GetKeyboardId\(VID, PID, 1\)') { exit 1 }
+          if ($s -notmatch 'POWERPNT\.EXE') { exit 1 }
+          if ($s -notmatch 'wpp\.exe') { exit 1 }
+          if ($s -notmatch 'Browser_Back::Send\("\{Esc\}"\)') { exit 1 }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Karabiner rule
+        run: |
+          python3 -m json.tool macos/xiaomi-remote-presenter.json >/dev/null
+          bash -n macos/install.sh
+
+      - name: Validate device/app conditions
+        run: |
+          python3 - <<'PY2'
+          import json
+          p=json.load(open('macos/xiaomi-remote-presenter.json'))
+          assert len(p['rules']) == 5
+          text=json.dumps(p)
+          assert '10007' in text and '12984' in text
+          bundles = [
+              b
+              for rule in p['rules']
+              for manip in rule['manipulators']
+              for cond in manip.get('conditions', [])
+              for b in cond.get('bundle_identifiers', [])
+          ]
+          assert any('microsoft' in b.lower() for b in bundles)
+          assert any('kingsoft' in b.lower() for b in bundles)
+          assert any('keynote' in b.lower() for b in bundles)
+          print('Karabiner rules ok')
+          PY2
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject obvious secrets
+        run: |
+          ! grep -RInE 'sk-[A-Za-z0-9_-]{20,}' --exclude-dir=.git .
