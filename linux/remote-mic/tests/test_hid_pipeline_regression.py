@@ -114,15 +114,15 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(ui.fwd,[])
 
-    async def test_home_closes_one_foreground_browser_tab(self):
+    async def test_home_opens_one_foreground_browser_tab(self):
         for home in (ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW):
             with self.subTest(home=home):
                 keys=[(home,1),(home,2),(home,2),(home,0)]
                 ui=await self.run_device(keys)
                 self.assertEqual(ui.writes,[
                     (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-                    (ecodes.EV_KEY,ecodes.KEY_W,1),
-                    (ecodes.EV_KEY,ecodes.KEY_W,0),
+                    (ecodes.EV_KEY,ecodes.KEY_T,1),
+                    (ecodes.EV_KEY,ecodes.KEY_T,0),
                     (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
                 ])
                 self.assertEqual(ui.syn_count,2)
@@ -142,8 +142,8 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui.writes,[])
         self.assertEqual(ui.fwd,[(ecodes.EV_KEY,c,v) for c,v in keys])
 
-    async def test_home_does_not_double_close_after_focus_change(self):
-        # The tab may disappear before the physical Home key is released.
+    async def test_home_does_not_open_extra_tab_after_focus_change(self):
+        # The browser may change focus as the new tab opens.
         # In that case the driver must swallow the release and any repeats
         # without querying focus again or sending an unpaired key-up event.
         keys=[(ecodes.KEY_HOME,1),(ecodes.KEY_HOME,2),
@@ -161,8 +161,8 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(is_browser.call_count,2)
         self.assertEqual(ui.writes,[
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
         ])
         self.assertEqual(ui.fwd,[
@@ -173,7 +173,7 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
     async def test_home_without_release_never_leaves_ctrl_pressed(self):
         ui=await self.run_device([(ecodes.KEY_HOME,1)])
         self.assertEqual(ui.writes[-2:],[
-            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
         ])
         self.assertEqual(ui.syn_count,2)
@@ -188,9 +188,9 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui.writes,[])
         self.assertEqual(ui.fwd,[(ecodes.EV_KEY,c,v) for c,v in keys])
 
-    async def test_home_and_www_same_physical_press_close_one_tab(self):
+    async def test_home_and_www_same_physical_press_open_one_tab(self):
         # Firmware may report the house icon via two different keycodes.
-        # Both rapid sequences are consumed but only one Ctrl+W is emitted.
+        # Both rapid sequences are consumed but only one Ctrl+T is emitted.
         keys=[
             (ecodes.KEY_HOME,1),
             (ecodes.KEY_WWW,1),
@@ -200,8 +200,8 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         ui=await self.run_device(keys)
         self.assertEqual(ui.writes,[
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
         ])
         self.assertEqual(ui.syn_count,2)
@@ -215,8 +215,8 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         ui=await self.run_device(keys)
         self.assertEqual(ui.writes,[
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
             (ecodes.EV_KEY,ecodes.KEY_D,1),
             (ecodes.EV_KEY,ecodes.KEY_D,0),
@@ -226,6 +226,35 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui.fwd,[
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,1),
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
+        ])
+
+    async def test_home_and_back_both_open_tabs_as_distinct_buttons(self):
+        keys=[
+            (ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0),
+            (ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0),
+        ]
+        ui=await self.run_device(keys)
+        combo=[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ]
+        self.assertEqual(ui.writes,combo+combo)
+        self.assertEqual(ui.syn_count,4)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_home_wps_does_not_close_or_open_browser_tab(self):
+        keys=[(ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'browser_window_focused',return_value=False),\
+             patch.object(hid,'wps_presentation_is_focused',return_value=True):
+            await hid.forward_device(remote)
+        self.assertEqual(ui.writes,[])
+        self.assertEqual(ui.fwd,[
+            (ecodes.EV_KEY,ecodes.KEY_HOME,1),
+            (ecodes.EV_KEY,ecodes.KEY_HOME,0),
         ])
 
     async def test_browser_menu_goes_to_next_tab_only_once(self):
@@ -297,8 +326,8 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_TAB,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
             (ecodes.EV_KEY,ecodes.KEY_D,1),
             (ecodes.EV_KEY,ecodes.KEY_D,0),
@@ -402,8 +431,8 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_TAB,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,1),
-            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
             (ecodes.EV_KEY,ecodes.KEY_D,1),
             (ecodes.EV_KEY,ecodes.KEY_D,0),
@@ -484,13 +513,19 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,0),
         ]
         ui=await self.run_device(keys)
-        once=[
+        home_new_tab=[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ]
+        tv_close_tab=[
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
             (ecodes.EV_KEY,ecodes.KEY_W,1),
             (ecodes.EV_KEY,ecodes.KEY_W,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
         ]
-        self.assertEqual(ui.writes,once+once)
+        self.assertEqual(ui.writes,home_new_tab+tv_close_tab)
         self.assertEqual(ui.syn_count,4)
         self.assertEqual(ui.fwd,[])
 

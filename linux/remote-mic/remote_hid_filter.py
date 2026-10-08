@@ -37,7 +37,8 @@ HOME_KEYS = {ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW}
 # KEY_TV, which is absent from this RC003 device capability list.
 # The device VID/PID filter keeps the PC keyboard unaffected.
 TV_KEYS = {ecodes.KEY_GRAVE}
-CLOSE_TAB_KEYS = HOME_KEYS | TV_KEYS
+NEW_TAB_KEYS = HOME_KEYS | BACK_KEYS
+CLOSE_TAB_KEYS = TV_KEYS
 # Standard HID keyboard Application/Menu key (usage 0x65), advertised
 # as KEY_COMPOSE by this RC003 keyboard. Do not remap unrelated keys.
 MENU_KEYS = {ecodes.KEY_COMPOSE}
@@ -294,17 +295,16 @@ async def forward_device(dev: InputDevice) -> None:
     swallowed_ok: set[int] = set()
     swallowed_close_tab: set[int] = set()
     swallowed_menu: set[int] = set()
-    swallowed_browser_back: set[int] = set()
-    # The remote advertises both KEY_HOME and KEY_WWW. Guard against
-    # firmware emitting both for the same physical press.
-    last_home_close_at = -float('inf')
+    swallowed_browser_new_tab: set[int] = set()
+    # HOME and WWW may be reported together by one physical press.
+    last_home_new_tab_at = -float('inf')
     wps_resume_until = 0.0
 
     try:
         dev.grab()
         LOG.info(
             'grabbed %s %s vendor=%04x product=%04x; '
-            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home/TV->Ctrl+W MENU->Ctrl+Tab BACK->Ctrl+T; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
+            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home/Back->Ctrl+T TV->Ctrl+W MENU->Ctrl+Tab; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
             dev.path, dev.name, VID, PID,
         )
 
@@ -341,63 +341,59 @@ async def forward_device(dev: InputDevice) -> None:
                                  ecodes.KEY[ev.code])
                         continue
 
-                if ev.code in BACK_KEYS:
-                    # Browser Back opens a fresh tab (Ctrl+T), instead of
-                    # navigating backwards. This must precede the WPS
-                    # Back->Esc branch, which remains in place for WPS.
-                    # Consume repeat and release even if focus changes after
-                    # the new tab appears. Always release Ctrl immediately.
-                    if ev.code in swallowed_browser_back:
+                if ev.code in NEW_TAB_KEYS:
+                    # Both the house-shaped Home key and browser Back
+                    # create one tab with Ctrl+T. Keep WPS Back->Esc below,
+                    # and pass ordinary Home/Back to non-browser apps.
+                    # Decide on key down, suppress physical repeat/release
+                    # regardless of a focus change caused by the new tab.
+                    if ev.code in swallowed_browser_new_tab:
                         if ev.value == 0:
-                            swallowed_browser_back.remove(ev.code)
+                            swallowed_browser_new_tab.remove(ev.code)
                         continue
                     if ev.value == 1 and await asyncio.to_thread(browser_window_focused):
-                        swallowed_browser_back.add(ev.code)
+                        swallowed_browser_new_tab.add(ev.code)
+                        if ev.code in HOME_KEYS:
+                            # Some Xiaomi firmware reports HOME + WWW for
+                            # one press. Do not coalesce independent Back
+                            # and Home buttons, or TV's close-tab action.
+                            now = time.monotonic()
+                            if now - last_home_new_tab_at < 0.18:
+                                LOG.info("browser Home duplicate suppressed: %s",
+                                         ecodes.KEY[ev.code])
+                                continue
+                            last_home_new_tab_at = now
                         ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
                         ui.write(ecodes.EV_KEY, ecodes.KEY_T, 1)
                         ui.syn()
                         ui.write(ecodes.EV_KEY, ecodes.KEY_T, 0)
                         ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
                         ui.syn()
-                        LOG.info("browser Back %s -> Ctrl+T (new tab)",
-                                 ecodes.KEY[ev.code])
+                        label = "Home" if ev.code in HOME_KEYS else "Back"
+                        LOG.info("browser %s %s -> Ctrl+T (new tab)",
+                                 label, ecodes.KEY[ev.code])
                         continue
-                    # Non-browser Back: use existing WPS Esc or original key.
 
                 if ev.code in CLOSE_TAB_KEYS:
-                    # Home and TV close one *foreground browser tab* via the
-                    # exact same Ctrl+W shortcut. Keep both physical keys
-                    # unchanged outside supported browser windows. Always
-                    # release Ctrl+W before focus can change and suppress
-                    # repeat/up events, so holding the remote never closes
-                    # more than one tab or leaves Ctrl stuck.
+                    # TV alone closes the current browser tab (Ctrl+W).
+                    # The house-shaped Home button has been reassigned to
+                    # Ctrl+T; it MUST NOT trigger this close-tab branch.
                     if ev.code in swallowed_close_tab:
                         if ev.value == 0:
                             swallowed_close_tab.remove(ev.code)
                         continue
                     if ev.value == 1 and await asyncio.to_thread(browser_window_focused):
                         swallowed_close_tab.add(ev.code)
-                        if ev.code in HOME_KEYS:
-                            # HOME and WWW can both fire for one physical
-                            # press. Deduplicate only those two variants,
-                            # not independently pressed TV and Home buttons.
-                            now = time.monotonic()
-                            if now - last_home_close_at < 0.18:
-                                LOG.info("browser Home duplicate suppressed: %s",
-                                         ecodes.KEY[ev.code])
-                                continue
-                            last_home_close_at = now
                         ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
                         ui.write(ecodes.EV_KEY, ecodes.KEY_W, 1)
                         ui.syn()
                         ui.write(ecodes.EV_KEY, ecodes.KEY_W, 0)
                         ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
                         ui.syn()
-                        label = "TV" if ev.code in TV_KEYS else "Home"
-                        LOG.info("browser %s %s -> Ctrl+W (close current tab)",
-                                 label, ecodes.KEY[ev.code])
+                        LOG.info("browser TV %s -> Ctrl+W (close current tab)",
+                                 ecodes.KEY[ev.code])
                         continue
-                    # Non-browser: pass original TV/Home key unchanged.
+                    # Non-browser TV: forward the unchanged physical event.
 
                 if ev.code in VIDEO_RATE_KEYS:
                     # ONLY Firefox native PiP: request a Global Speed
