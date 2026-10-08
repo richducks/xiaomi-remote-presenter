@@ -288,6 +288,7 @@ async def forward_device(dev: InputDevice) -> None:
     swallowed_ok: set[int] = set()
     swallowed_home: set[int] = set()
     swallowed_menu: set[int] = set()
+    swallowed_browser_back: set[int] = set()
     # The remote advertises both KEY_HOME and KEY_WWW. Guard against
     # firmware emitting both for the same physical press.
     last_home_close_at = -float('inf')
@@ -297,7 +298,7 @@ async def forward_device(dev: InputDevice) -> None:
         dev.grab()
         LOG.info(
             'grabbed %s %s vendor=%04x product=%04x; '
-            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home->Ctrl+W MENU->Ctrl+Tab; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
+            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home->Ctrl+W MENU->Ctrl+Tab BACK->Ctrl+T; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
             dev.path, dev.name, VID, PID,
         )
 
@@ -333,6 +334,29 @@ async def forward_device(dev: InputDevice) -> None:
                         LOG.info("browser Menu %s -> Ctrl+Tab (next tab)",
                                  ecodes.KEY[ev.code])
                         continue
+
+                if ev.code in BACK_KEYS:
+                    # Browser Back opens a fresh tab (Ctrl+T), instead of
+                    # navigating backwards. This must precede the WPS
+                    # Back->Esc branch, which remains in place for WPS.
+                    # Consume repeat and release even if focus changes after
+                    # the new tab appears. Always release Ctrl immediately.
+                    if ev.code in swallowed_browser_back:
+                        if ev.value == 0:
+                            swallowed_browser_back.remove(ev.code)
+                        continue
+                    if ev.value == 1 and await asyncio.to_thread(browser_window_focused):
+                        swallowed_browser_back.add(ev.code)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_T, 1)
+                        ui.syn()
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_T, 0)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
+                        ui.syn()
+                        LOG.info("browser Back %s -> Ctrl+T (new tab)",
+                                 ecodes.KEY[ev.code])
+                        continue
+                    # Non-browser Back: use existing WPS Esc or original key.
 
                 if ev.code in HOME_KEYS:
                     # A short, balanced Ctrl+W closes exactly one *foreground*

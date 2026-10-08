@@ -7,6 +7,7 @@
 - **WPS 幻灯片**：OK → F5，返回 → Esc。
 - **浏览器关闭当前标签页**：遥控器**小房子/Home** 键 → **Ctrl+W**，只在支持的网页浏览器窗口处于前台时触发（Firefox、Chrome、Chromium、Edge、Brave、Opera、Vivaldi、LibreWolf、Tor、Zen、GNOME Web 等）；普通网页也能用，无需正在播放视频。长按只关闭一个标签页。其他应用的 Home 键保持原始功能。
 - **浏览器切换标签页**：遥控器**三横杠菜单键（≡ / KEY_COMPOSE）** → **Ctrl+Tab**，切换到下一个标签页；Firefox、Chrome、Chromium、Edge、Brave、Opera、Vivaldi 等浏览器前台均适用；非浏览器保持原生菜单键。长按只切换一次，不会卡住 Ctrl。
+- **浏览器新建标签页**：遥控器**返回键（KEY_BACK）** → **Ctrl+T**，在 Firefox、Chrome、Chromium、Edge、Brave、Opera、Vivaldi 等浏览器中新建标签页；长按只创建一个。WPS 中仍为 Esc，其他非浏览器应用保持原来的返回键。
 - **普通 Firefox / Chromium 视频**：圆盘上 → Global Speed 的 D（+0.1x），圆盘下 → A（-0.1x）。
 - **Firefox 原生画中画（PiP）**：原视频页面接收 D/A，由已经安装的 Global Speed 负责改速；画中画不会因为切换焦点而关闭。
 - **耳机、外置播放器和独立音量键**：保持原有音量行为。
