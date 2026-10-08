@@ -415,6 +415,118 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
         ])
 
+    async def test_browser_tv_key_grave_closes_one_tab(self):
+        self.assertEqual(hid.TV_KEYS, {ecodes.KEY_GRAVE})
+        ui=await self.run_device([
+            (ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,2),
+            (ecodes.KEY_GRAVE,2),(ecodes.KEY_GRAVE,0),
+        ])
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_browser_tv_no_release_never_leaves_ctrl_pressed(self):
+        ui=await self.run_device([(ecodes.KEY_GRAVE,1)])
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+
+    async def test_tv_outside_browser_passes_original_key(self):
+        keys=[(ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,2),
+              (ecodes.KEY_GRAVE,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'browser_window_focused',return_value=False),\
+             patch.object(hid,'wps_presentation_is_focused',return_value=False):
+            await hid.forward_device(remote)
+        self.assertEqual(ui.writes,[])
+        self.assertEqual(ui.fwd,[
+            (ecodes.EV_KEY,code,val) for code,val in keys
+        ])
+
+    async def test_browser_tv_release_after_focus_change_never_leaks(self):
+        keys=[(ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,2),
+              (ecodes.KEY_GRAVE,0),
+              (ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'browser_window_focused',
+                          side_effect=[True,False]) as is_browser,\
+             patch.object(hid,'wps_presentation_is_focused',return_value=False),\
+             patch.object(hid,'toggle_browser_play_pause',return_value=False):
+            await hid.forward_device(remote)
+        self.assertEqual(is_browser.call_count,2)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ])
+        self.assertEqual(ui.fwd,[
+            (ecodes.EV_KEY,ecodes.KEY_GRAVE,1),
+            (ecodes.EV_KEY,ecodes.KEY_GRAVE,0),
+        ])
+
+    async def test_home_and_tv_are_independent_shortcut_buttons(self):
+        # TV has an independent physical event, so do not debounce it
+        # against the house key when the two are intentionally tapped.
+        keys=[
+            (ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0),
+            (ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,0),
+        ]
+        ui=await self.run_device(keys)
+        once=[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ]
+        self.assertEqual(ui.writes,once+once)
+        self.assertEqual(ui.syn_count,4)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_tv_menu_back_dpad_and_volume_are_independent(self):
+        keys=[
+            (ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,0),
+            (ecodes.KEY_COMPOSE,1),(ecodes.KEY_COMPOSE,0),
+            (ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0),
+            (ecodes.KEY_UP,1),(ecodes.KEY_UP,0),
+            (ecodes.KEY_DOWN,1),(ecodes.KEY_DOWN,0),
+            (ecodes.KEY_VOLUMEUP,1),(ecodes.KEY_VOLUMEUP,0),
+        ]
+        ui=await self.run_device(keys)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_D,1),
+            (ecodes.EV_KEY,ecodes.KEY_D,0),
+            (ecodes.EV_KEY,ecodes.KEY_A,1),
+            (ecodes.EV_KEY,ecodes.KEY_A,0),
+        ])
+        self.assertEqual(ui.fwd,[
+            (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,1),
+            (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
+        ])
+
     async def test_wps_shortcuts_preserved(self):
         self.assertEqual(hid.OK_KEYS,{ecodes.KEY_ENTER,ecodes.KEY_OK})
         self.assertIn(ecodes.KEY_BACK,hid.BACK_KEYS)
