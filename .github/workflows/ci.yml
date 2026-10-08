@@ -10,20 +10,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Linux shell and Python
+      - name: Validate Linux scripts and Python
         run: |
           bash -n linux/install.sh linux/uninstall.sh linux/diagnose.sh
           python3 -m py_compile linux/remote_hid_filter.py
+          bash -n macos/install.sh
 
-      - name: Install Linux test dependencies
+      - name: Install original Linux test dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-evdev python3-pytest
 
-      - name: Run Linux tests
+      - name: Linux presenter regression
         run: |
           cd linux
           python3 -m pytest -q tests
+
+      - name: Cross-platform mapping contract and browser video
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py' -q
+          node browser/tests/video-ok.test.cjs
 
   windows:
     runs-on: windows-latest
@@ -33,58 +39,62 @@ jobs:
       - name: Parse PowerShell installers
         shell: powershell
         run: |
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "windows/install.ps1"), [ref]$null, [ref]$errors
-          ) > $null
-          if ($errors.Count) { $errors | Out-String | Write-Error; exit 1 }
+          foreach ($file in @("windows/install.ps1", "windows/uninstall.ps1")) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file), [ref]$null, [ref]$errors
+            ) > $null
+            if ($errors.Count) {
+              $errors | Out-String | Write-Error
+              exit 1
+            }
+          }
 
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "windows/uninstall.ps1"), [ref]$null, [ref]$errors
-          ) > $null
-          if ($errors.Count) { $errors | Out-String | Write-Error; exit 1 }
-
-      - name: Validate AutoHotkey contract
+      - name: Validate AutoHotkey device and browser contract
         shell: powershell
         run: |
           $s = Get-Content windows/xiaomi_remote_presenter.ahk -Raw
-          if ($s -notmatch '#Requires AutoHotkey v2\.0') { exit 1 }
-          if ($s -notmatch 'GetKeyboardId\(VID, PID, 1\)') { exit 1 }
-          if ($s -notmatch 'POWERPNT\.EXE') { exit 1 }
-          if ($s -notmatch 'wpp\.exe') { exit 1 }
-          if ($s -notmatch 'Browser_Back::Send\("\{Esc\}"\)') { exit 1 }
+          $need = @(
+            '#Requires AutoHotkey v2.0',
+            'GetKeyboardId(VID, PID, 1)',
+            'CreateContextManager(KeyboardId)',
+            'IsPresentationEditor()',
+            'IsBrowser()',
+            'Home::SendOnce("Home", "^t")',
+            'SC029::SendOnce("SC029", "^w")',
+            'AppsKey::SendOnce("AppsKey", "^{Tab}")',
+            'Browser_Back::SendOnce("Browser_Back", "!{Left}")',
+            'Browser_Back::SendOnce("Browser_Back", "{Esc}")',
+            'Enter::SendOnce("Enter", "{F5}")',
+            'Enter::SendOnce("Enter", "{F13}")',
+            'Up::SendOnce("Up", "d")',
+            'Down::SendOnce("Down", "a")'
+          )
+          foreach ($item in $need) {
+            if (-not $s.Contains($item)) {
+              Write-Error "Missing Windows device mapping: $item"
+              exit 1
+            }
+          }
+          if (-not (Test-Path "browser/xiaomi-remote-video.user.js")) { exit 1 }
+          Write-Host "Windows AutoHotkey mapping contract passed"
 
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Karabiner rule
+      - name: Validate Mac shell and regenerate Karabiner JSON
         run: |
-          python3 -m json.tool macos/xiaomi-remote-presenter.json >/dev/null
           bash -n macos/install.sh
+          python3 macos/build_rules.py
+          git diff --exit-code -- macos/xiaomi-remote-presenter.json macos/xiaomi-remote-video-speed.json
+          python3 -m json.tool macos/xiaomi-remote-presenter.json >/dev/null
+          python3 -m json.tool macos/xiaomi-remote-video-speed.json >/dev/null
 
-      - name: Validate device/app conditions
+      - name: Mac device/app and optional speed contracts
         run: |
-          python3 - <<'PY2'
-          import json
-          p=json.load(open('macos/xiaomi-remote-presenter.json'))
-          assert len(p['rules']) == 5
-          text=json.dumps(p)
-          assert '10007' in text and '12984' in text
-          bundles = [
-              b
-              for rule in p['rules']
-              for manip in rule['manipulators']
-              for cond in manip.get('conditions', [])
-              for b in cond.get('bundle_identifiers', [])
-          ]
-          assert any('microsoft' in b.lower() for b in bundles)
-          assert any('kingsoft' in b.lower() for b in bundles)
-          assert any('keynote' in b.lower() for b in bundles)
-          print('Karabiner rules ok')
-          PY2
+          python3 -m unittest discover -s tests -p 'test_*.py' -q
 
   hygiene:
     runs-on: ubuntu-latest

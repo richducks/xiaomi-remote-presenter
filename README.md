@@ -1,24 +1,38 @@
 # Xiaomi Remote Presenter
 
-Turn a **Xiaomi Remote 2 Pro / Xiaomi Bluetooth Voice Remote** into a device-specific presentation remote on **Windows, macOS, and Linux**.
+Turn a **Xiaomi Remote 2 Pro / Xiaomi Bluetooth Voice Remote** into a device-specific **browser, video and presentation** remote on **Windows, macOS, and Linux**.
+
+**[中文完整使用手册：按键表、Windows/macOS/Linux 安装、视频兼容与验收](docs/中文使用手册.md)**
 
 The key design rule is: **never globally remap Enter/Back**. The remote reports OK as an Enter-like key, so each operating system uses a device-aware input layer.
 
 ## Platform matrix
 
-| Platform | Backend | Device-specific | App-specific | State |
-|---|---|---:|---:|---|
-| Linux | evdev + uinput + XWayland focus recovery | Yes | Yes | Tested on Ubuntu/GNOME/Wayland |
-| Windows | AutoHotkey v2 + AutoHotInterception | Yes | Yes | Implemented; requires Interception driver + reboot |
-| macOS | Karabiner-Elements | Yes | Yes | Implemented; requires Karabiner permissions |
+| Platform | Backend | Device-specific | Browser tabs & navigation | Video OK | Global Speed | Validation |
+|---|---|---:|---|---|---|---|
+| Linux | evdev + uinput | Yes | Yes | MPRIS → YouTube K fallback | D/A on focused video | Tested on Ubuntu/GNOME |
+| Windows | AutoHotkey v2 + AutoHotInterception | Yes | Yes | F13 + browser userscript | D/A on recognized video-site titles | Static/CI only; needs Windows hardware validation |
+| macOS | Karabiner-Elements | Yes | Yes | F13 + browser userscript | Optional all-browser D/A mode (scroll conflict) | JSON/CI only; needs Mac hardware validation |
 
-## Default behavior
+## Default browser behavior
 
-| Remote button | WPS Presentation | Microsoft PowerPoint | Keynote |
-|---|---|---|---|
-| OK | Start slideshow | Start slideshow | Play presentation |
-| Back | Esc | Esc | Esc |
-| Remote physical F5 | blocked by default | blocked by default | blocked by default |
+| Xiaomi button | Windows/Linux | macOS |
+|---|---|---|
+| Home (house) | Ctrl+T: new tab | Command+T |
+| TV | Ctrl+W: close tab | Command+W |
+| Menu (three lines) | Ctrl+Tab: next tab | Control+Tab |
+| Back | Alt+Left: previous page | Command+[ |
+| OK | Browser video play/pause | Browser video play/pause |
+| Round Up/Down | Global Speed D/A (video-context limitations) | Optional Global Speed D/A mode |
+| Volume +/- | Unchanged | Unchanged |
+
+For presentation apps: OK starts slideshow; Back sends Esc.
+Only the Xiaomi remote is remapped; ordinary keyboards remain untouched.
+
+Browser OK on Windows/macOS requires
+[browser/xiaomi-remote-video.user.js](browser/xiaomi-remote-video.user.js)
+via Tampermonkey or Violentmonkey. Linux's Firefox PiP/video bridge and BLE
+microphone are separate platform-specific implementations.
 
 ## Platform guides
 
@@ -26,6 +40,7 @@ The key design rule is: **never globally remap Enter/Back**. The remote reports 
 - [Linux 增强版：Global Speed 视频倍速、Firefox 画中画、BLE 麦克风](linux/remote-mic/README.md)
 - [Windows](windows/README.md)
 - [macOS](macos/README.md)
+- [中文使用手册 / Chinese manual](docs/中文使用手册.md)
 
 ## Tested hardware ID
 
@@ -47,4 +62,9 @@ The same behavior needs different OS-native interception mechanisms:
 - **MIT**: the original Windows, macOS and Linux presentation-remote implementation (see [LICENSE](LICENSE)).
 - **GPL-3.0-only**: the separate [Linux enhanced remote/microphone and Global Speed integration](linux/remote-mic/README.md) (see [linux/remote-mic/LICENSE](linux/remote-mic/LICENSE)).
 
-The Linux Global Speed/Firefox native Picture-in-Picture integration has been tested on Ubuntu/GNOME/Firefox. The Windows/macOS versions currently cover presentation remapping only; these platform-specific features are not yet ported.
+The Linux Global Speed / Firefox native PiP integration is tested on Ubuntu.
+Windows and macOS now also implement device-specific browser keyboard mappings
+and a browser video userscript, but they have not been verified on physical
+Windows or Mac hosts. Linux's native PiP Global Speed bridge and BLE voice
+capture are not cross-platform. macOS speed controls are opt-in because they
+take over browser arrow keys. See the Chinese manual for complete limitations.

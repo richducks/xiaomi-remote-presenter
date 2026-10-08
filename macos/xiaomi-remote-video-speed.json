@@ -1,0 +1,105 @@
+{
+  "title": "Xiaomi 2 Pro · Global Speed 视频模式（可选，浏览器占用方向键）",
+  "rules": [
+    {
+      "description": "视频模式（可选）: 上键 -> Global Speed D (+0.1x)",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "up_arrow",
+            "modifiers": {
+              "optional": [
+                "any"
+              ]
+            }
+          },
+          "conditions": [
+            {
+              "type": "device_if",
+              "identifiers": [
+                {
+                  "vendor_id": 10007,
+                  "product_id": 12984
+                }
+              ]
+            },
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": [
+                "^com\\.apple\\.Safari$",
+                "^org\\.mozilla\\.firefox$",
+                "^org\\.mozilla\\.firefoxdeveloperedition$",
+                "^org\\.mozilla\\.nightly$",
+                "^com\\.google\\.Chrome(?:\\.beta|\\.dev|\\.canary)?$",
+                "^com\\.microsoft\\.edgemac(?:\\.Beta|\\.Dev|\\.Canary)?$",
+                "^com\\.brave\\.Browser(?:\\.beta|\\.nightly)?$",
+                "^com\\.operasoftware\\.Opera(?:Next)?$",
+                "^com\\.vivaldi\\.Vivaldi$",
+                "^org\\.chromium\\.Chromium$",
+                "^org\\.torproject\\.TorBrowser$",
+                "^org\\.mozilla\\.librewolf$"
+              ]
+            }
+          ],
+          "to": [
+            {
+              "key_code": "d",
+              "repeat": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "视频模式（可选）: 下键 -> Global Speed A (-0.1x)",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "down_arrow",
+            "modifiers": {
+              "optional": [
+                "any"
+              ]
+            }
+          },
+          "conditions": [
+            {
+              "type": "device_if",
+              "identifiers": [
+                {
+                  "vendor_id": 10007,
+                  "product_id": 12984
+                }
+              ]
+            },
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": [
+                "^com\\.apple\\.Safari$",
+                "^org\\.mozilla\\.firefox$",
+                "^org\\.mozilla\\.firefoxdeveloperedition$",
+                "^org\\.mozilla\\.nightly$",
+                "^com\\.google\\.Chrome(?:\\.beta|\\.dev|\\.canary)?$",
+                "^com\\.microsoft\\.edgemac(?:\\.Beta|\\.Dev|\\.Canary)?$",
+                "^com\\.brave\\.Browser(?:\\.beta|\\.nightly)?$",
+                "^com\\.operasoftware\\.Opera(?:Next)?$",
+                "^com\\.vivaldi\\.Vivaldi$",
+                "^org\\.chromium\\.Chromium$",
+                "^org\\.torproject\\.TorBrowser$",
+                "^org\\.mozilla\\.librewolf$"
+              ]
+            }
+          ],
+          "to": [
+            {
+              "key_code": "a",
+              "repeat": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

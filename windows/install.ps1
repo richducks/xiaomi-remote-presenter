@@ -66,6 +66,15 @@ Copy-Item (Join-Path $InterceptionExtract "Interception\library\x86\interception
 $SourceScript = Join-Path $PSScriptRoot "xiaomi_remote_presenter.ahk"
 Copy-Item $SourceScript (Join-Path $InstallDir "xiaomi_remote_presenter.ahk") -Force
 
+# Keep the browser companion beside the installed controller so the user
+# can import it without looking for the Git checkout.
+$BrowserDir = Join-Path $InstallDir "browser"
+New-Item -ItemType Directory -Path $BrowserDir -Force | Out-Null
+$BrowserUserscript = Join-Path (Split-Path $PSScriptRoot -Parent) "browser\xiaomi-remote-video.user.js"
+if (Test-Path $BrowserUserscript) {
+    Copy-Item $BrowserUserscript (Join-Path $BrowserDir "xiaomi-remote-video.user.js") -Force
+}
+
 if ($InstallDriver) {
     $DriverInstaller = Join-Path $InterceptionExtract "Interception\command line installer\install-interception.exe"
     Write-Host "Installing Interception driver with administrator privileges..."
@@ -96,3 +105,7 @@ if (-not $InstallDriver) {
 } else {
     Write-Host "Reboot Windows once, then the controller will start at login."
 }
+
+Write-Host "Browser OK uses F13. Import the userscript into Tampermonkey or Violentmonkey:"
+Write-Host ("  " + (Join-Path $InstallDir "browser\xiaomi-remote-video.user.js"))
+Write-Host "Global Speed D/A is triggered only on recognized video sites."
