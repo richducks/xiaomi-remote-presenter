@@ -53,7 +53,7 @@ install.sh 不调用 sudo、不删除现有环境。如果 /dev/input/eventX 或
 
 1. 在 Firefox 启用 **Global Speed – 视频速度控制器**。
 2. 在插件「页面快捷键」里把 **D 设为在当前速度上 +0.1x**，**A 设为在当前速度上 -0.1x**。不能设置成固定 1.5x、1.2x，否则会发生速率循环。
-3. 放行视频网站域名，例如 www.bilibili.com、pan.quark.cn。先用电脑实体键盘 D/A 确认普通网页倍速有效。
+3. Global Speed 的「选项 → 页面快捷键 → URL 条件」默认是白名单，包含 B 站但不包含抖音和夸克。需要另外新增 https://www.douyin.com 和 https://pan.quark.cn 两条「以…开始」规则，并保留原有条件。最后用电脑实体键盘 D/A 确认普通网页倍速有效。
 4. 普通视频不需要本项目的 Tampermonkey 辅助脚本。Firefox **原生画中画**需要下一节的 v0.5 浏览器辅助脚本。
 
 Global Speed 是**唯一的倍速修改引擎**。用户脚本只合成快捷键并读取播放速率，不直接修改 playbackRate。旧版的 Firefox 原生 PiP < >、切窗映射和直接改速均未发布。
