@@ -1,0 +1,4 @@
+# Optional; review security before installing. No installer runs sudo.
+# Xiaomi Remote 2 Pro 0x2717:0x32B8; local desktop seat only.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{id/vendor}=="2717", ATTRS{id/product}=="32b8", TAG+="uaccess"
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess"

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xiaomi-remote-mic-linux"
+version = "0.1.1"
+description = "Linux ATVV voice bridge for Xiaomi Bluetooth Remote 2 Pro (RC003)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-only"}
+dependencies = [
+  "bleak>=0.22,<2",
+  "evdev>=1.7,<2",
+  "aiohttp>=3.9,<4",
+]
+
+[project.scripts]
+xiaomi-remote-mic = "xiaomi_remote_mic_linux.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

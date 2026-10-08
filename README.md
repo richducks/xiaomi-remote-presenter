@@ -22,7 +22,8 @@ The key design rule is: **never globally remap Enter/Back**. The remote reports 
 
 ## Platform guides
 
-- [Linux](linux/README.md)
+- [Linux 演示遥控器 / Linux presenter](linux/README.md)
+- [Linux 增强版：Global Speed 视频倍速、Firefox 画中画、BLE 麦克风](linux/remote-mic/README.md)
 - [Windows](windows/README.md)
 - [macOS](macos/README.md)
 
@@ -41,6 +42,9 @@ The same behavior needs different OS-native interception mechanisms:
 - Windows needs a per-device filter; AutoHotInterception provides this through the Interception driver.
 - macOS Karabiner-Elements provides `device_if` plus `frontmost_application_if`, which lets the mapping target both the Xiaomi remote and the presentation app.
 
-## License
+## Licenses
 
-MIT
+- **MIT**: the original Windows, macOS and Linux presentation-remote implementation (see [LICENSE](LICENSE)).
+- **GPL-3.0-only**: the separate [Linux enhanced remote/microphone and Global Speed integration](linux/remote-mic/README.md) (see [linux/remote-mic/LICENSE](linux/remote-mic/LICENSE)).
+
+The Linux Global Speed/Firefox native Picture-in-Picture integration has been tested on Ubuntu/GNOME/Firefox. The Windows/macOS versions currently cover presentation remapping only; these platform-specific features are not yet ported.

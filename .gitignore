@@ -5,3 +5,18 @@ __pycache__/
 *.log
 *.before-*
 .DS_Store
+
+# Keep private keys, browser profiles, generated builds and local backups private
+*.pem
+*.key
+.env
+.env.*
+!*.env.example
+*.crx
+*.xpi
+artifacts/
+*.failed-*
+*.backup-*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

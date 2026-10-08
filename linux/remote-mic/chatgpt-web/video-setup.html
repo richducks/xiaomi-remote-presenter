@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小米遥控器 · Global Speed 画中画设置</title>
+<style>
+:root{color-scheme:light dark;font-family:system-ui,-apple-system,"Noto Sans CJK SC",sans-serif}
+body{margin:0 auto;max-width:760px;padding:42px 24px;line-height:1.7;font-size:17px}
+h1{font-size:26px;font-weight:700;margin:0 0 8px}
+h2{font-size:19px;margin-top:28px}
+p{margin:12px 0}
+a.primary{display:inline-block;background:#333;color:#fff;text-decoration:none;border-radius:9px;
+padding:12px 18px;font-weight:650;margin:14px 0}
+pre{white-space:pre-wrap;word-break:break-all;background:color-mix(in srgb,currentColor 8%,transparent);
+padding:14px;border-radius:8px;font-size:15px}
+.small{font-size:14px;opacity:.76}
+hr{border:0;border-top:1px solid color-mix(in srgb,currentColor 20%,transparent);margin:24px 0}
+</style>
+</head>
+<body>
+<h1>小米遥控器 2 Pro · Firefox 画中画</h1>
+<p>倍速完全由已安装的 <strong>Global Speed</strong> 插件处理。遥控器圆盘上/下转发为 <strong>D / A</strong>，不会额外直接修改视频播放速度。</p>
+<h2>一次性更新 Firefox 辅助脚本</h2>
+<p>请使用 Firefox 打开安装页面，在 Tampermonkey 中确认<strong>更新/安装 v0.5.0</strong>，再刷新视频网站。普通模式不需要这个辅助脚本。</p>
+<a class="primary" href="/xiaomi-video-speed.user.js" target="_blank" rel="noopener">更新 Global Speed 画中画辅助脚本</a>
+<hr>
+<h2>连接状态（自动刷新）</h2>
+<pre id="connect">正在读取…</pre>
+<h2>测试方法</h2>
+<p>打开视频网站，进入 Firefox 原生画中画；使画中画窗口处于前台；按遥控器圆盘上/下各一次。检测结果会显示在下方。</p>
+<pre id="result">尚未收到实机测试报告。</pre>
+<p class="small">只有当版本为 v5 且检测到正在播放的 Firefox 视频时才会启动画中画转发；普通播放和音量键始终使用原有映射。收到按键不等于倍速成功，必须看到实际速率变化。</p>
+<script>
+async function refresh(){
+ try{
+  const r=await fetch('/video/debug',{cache:'no-store'});
+  const j=await r.json();
+  const versions=j.client_versions?.firefox||[];
+  const installed=versions.includes(5);
+  document.getElementById('connect').textContent=
+   'Firefox 页面脚本版本：'+(versions.length?'v'+versions.join(', v'):'尚未连接')+
+   '\n辅助脚本 v0.5：'+(installed?'已连接':'未安装、尚未刷新或视频页面未运行')+
+   '\n正在播放的 Firefox 视频：'+(j.pip_ready?'已就绪':'未连接')+
+   '\n本地服务状态：正常';
+  const last=(j.last_results||[]).filter(x=>x.pip&&x.engine==='global-speed').slice(-2);
+  if(last.length){
+   document.getElementById('result').textContent=last.map(x=>
+     (x.ok?'视频倍速已变化':'按键已发送，但未观察到倍速变化')+
+     ' · '+(x.key||'?')+
+     '\n播放速度：'+(x.before??'?')+' → '+(x.speed??'?')+
+     (x.reason?' · '+x.reason:'')
+   ).join('\n\n');
+  }
+ }catch(e){document.getElementById('connect').textContent='无法连接本地桥接服务：'+e.message}
+}
+refresh();setInterval(refresh,2500);
+</script>
+</body></html>
