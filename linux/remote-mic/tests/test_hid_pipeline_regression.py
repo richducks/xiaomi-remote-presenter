@@ -228,6 +228,88 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
         ])
 
+    async def test_browser_menu_goes_to_next_tab_only_once(self):
+        keys=[(ecodes.KEY_COMPOSE,1),
+              (ecodes.KEY_COMPOSE,2),
+              (ecodes.KEY_COMPOSE,2),
+              (ecodes.KEY_COMPOSE,0)]
+        ui=await self.run_device(keys)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_menu_non_browser_preserves_original_key(self):
+        keys=[(ecodes.KEY_COMPOSE,1),(ecodes.KEY_COMPOSE,2),
+              (ecodes.KEY_COMPOSE,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'browser_window_focused',return_value=False):
+            await hid.forward_device(remote)
+        self.assertEqual(ui.writes,[])
+        self.assertEqual(ui.fwd,[(ecodes.EV_KEY,c,v) for c,v in keys])
+
+    async def test_menu_release_does_not_leak_after_browser_focus_changes(self):
+        keys=[(ecodes.KEY_COMPOSE,1),(ecodes.KEY_COMPOSE,2),
+              (ecodes.KEY_COMPOSE,0),
+              (ecodes.KEY_COMPOSE,1),(ecodes.KEY_COMPOSE,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'browser_window_focused',
+                          side_effect=[True,False]) as is_browser:
+            await hid.forward_device(remote)
+        self.assertEqual(is_browser.call_count,2)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ])
+        self.assertEqual(ui.fwd,[
+            (ecodes.EV_KEY,ecodes.KEY_COMPOSE,1),
+            (ecodes.EV_KEY,ecodes.KEY_COMPOSE,0),
+        ])
+
+    async def test_menu_disconnect_never_leaves_ctrl_pressed(self):
+        ui=await self.run_device([(ecodes.KEY_COMPOSE,1)])
+        self.assertEqual(ui.writes[-2:],[
+            (ecodes.EV_KEY,ecodes.KEY_TAB,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+
+    async def test_menu_and_home_are_independent(self):
+        keys=[
+            (ecodes.KEY_COMPOSE,1),(ecodes.KEY_COMPOSE,0),
+            (ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0),
+            (ecodes.KEY_UP,1),(ecodes.KEY_UP,0),
+            (ecodes.KEY_DOWN,1),(ecodes.KEY_DOWN,0),
+            (ecodes.KEY_VOLUMEUP,1),(ecodes.KEY_VOLUMEUP,0),
+        ]
+        ui=await self.run_device(keys)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_D,1),
+            (ecodes.EV_KEY,ecodes.KEY_D,0),
+            (ecodes.EV_KEY,ecodes.KEY_A,1),
+            (ecodes.EV_KEY,ecodes.KEY_A,0),
+        ])
+        self.assertEqual(ui.fwd,[
+            (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,1),
+            (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
+        ])
+
     async def test_wps_shortcuts_preserved(self):
         self.assertEqual(hid.OK_KEYS,{ecodes.KEY_ENTER,ecodes.KEY_OK})
         self.assertIn(ecodes.KEY_BACK,hid.BACK_KEYS)

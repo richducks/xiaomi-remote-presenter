@@ -32,6 +32,9 @@ BACK_KEYS = {ecodes.KEY_BACK}
 # firmware variants can use either for the house-shaped Home/browser key.
 # Some other keyboards use KEY_HOMEPAGE. All stay untouched outside browsers.
 HOME_KEYS = {ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW}
+# Standard HID keyboard Application/Menu key (usage 0x65), advertised
+# as KEY_COMPOSE by this RC003 keyboard. Do not remap unrelated keys.
+MENU_KEYS = {ecodes.KEY_COMPOSE}
 
 # Single speed engine: Firefox/Chrome Global Speed extension.
 # ONLY the remote round D-pad UP/DOWN is remapped to the extension's
@@ -284,6 +287,7 @@ async def forward_device(dev: InputDevice) -> None:
     mapped_down: dict[int, int] = {}
     swallowed_ok: set[int] = set()
     swallowed_home: set[int] = set()
+    swallowed_menu: set[int] = set()
     # The remote advertises both KEY_HOME and KEY_WWW. Guard against
     # firmware emitting both for the same physical press.
     last_home_close_at = -float('inf')
@@ -293,7 +297,7 @@ async def forward_device(dev: InputDevice) -> None:
         dev.grab()
         LOG.info(
             'grabbed %s %s vendor=%04x product=%04x; '
-            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home->Ctrl+W; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
+            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home->Ctrl+W MENU->Ctrl+Tab; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
             dev.path, dev.name, VID, PID,
         )
 
@@ -307,6 +311,28 @@ async def forward_device(dev: InputDevice) -> None:
                         ev.value, blocked,
                     )
                     continue
+
+                if ev.code in MENU_KEYS:
+                    # Browser next-tab shortcut, independent of video/MPRIS.
+                    # SYN after press and release makes this a single short
+                    # Ctrl+Tab, never a held modifier. Consume repeats and
+                    # physical release, even after browser focus changes.
+                    # Non-browser apps receive the physical Menu unchanged.
+                    if ev.code in swallowed_menu:
+                        if ev.value == 0:
+                            swallowed_menu.remove(ev.code)
+                        continue
+                    if ev.value == 1 and await asyncio.to_thread(browser_window_focused):
+                        swallowed_menu.add(ev.code)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_TAB, 1)
+                        ui.syn()
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_TAB, 0)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
+                        ui.syn()
+                        LOG.info("browser Menu %s -> Ctrl+Tab (next tab)",
+                                 ecodes.KEY[ev.code])
+                        continue
 
                 if ev.code in HOME_KEYS:
                     # A short, balanced Ctrl+W closes exactly one *foreground*
