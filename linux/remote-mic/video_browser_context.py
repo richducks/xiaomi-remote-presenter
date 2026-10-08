@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import json
+import re
 import urllib.request
 from typing import Any
 
@@ -45,8 +46,8 @@ def is_browser_application(app_name: str) -> bool:
 def browser_window_focused() -> bool:
     """Whether the *foreground window* belongs to a supported web browser.
 
-    Does not require playback/MPRIS, so Home -> Ctrl+W also works on ordinary
-    pages such as new tabs, articles and sites without media support.
+    Does not require playback/MPRIS, so browser Home -> Ctrl+T and TV
+    -> Ctrl+W also work on ordinary pages without any media support.
     """
     try:
         import gi
@@ -195,6 +196,74 @@ def browser_media_tab_focused() -> bool:
             "http://127.0.0.1:18766/video/active?browser="+browser)
         with urllib.request.urlopen(req,timeout=0.15) as r:
             return bool(json.load(r).get('active'))
+    except Exception:
+        return False
+
+
+def youtube_video_tab_focused() -> bool:
+    """Allow YouTube's native K shortcut only on its selected video page.
+
+    YouTube's page title can be machine-translated from Traditional Chinese
+    into Simplified Chinese while MPRIS keeps the original title. This
+    prevents exact MPRIS title matching from recognizing the active video.
+    The foreground video page is identified from its browser window title.
+    We intentionally do not require the Firefox-only userscript heartbeat:
+    a YouTube watch page may not expose MPRIS and Chrome has no video
+    helper, yet its native K shortcut still works. The active window must
+    belong to a supported browser, and focused editable fields are excluded
+    so the shortcut never types into search/comments.
+    """
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+        desktop = Atspi.get_desktop(0)
+        active = active_browser_window(desktop, Atspi)
+        if not active:
+            return False
+        browser, title = active
+        # YouTube video titles end in " - YouTube" before the browser
+        # suffix ("— Mozilla Firefox", "- Google Chrome", etc.).
+        # Do not mistake YouTube Music or the YouTube homepage for a video.
+        if not re.search(r'\s-\sYouTube(?:\s*[—-]\s*.+)?$', title, re.I):
+            return False
+
+        # The K shortcut should never type the letter 'k' into YouTube's
+        # search box or a chat/comment field. Check accessibility focus.
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if not app or not is_browser_application(app.get_name()):
+                continue
+            for j in range(app.get_child_count()):
+                frame = app.get_child_at_index(j)
+                try:
+                    if (frame.get_role_name() != 'frame' or
+                            not frame.get_state_set().contains(
+                                Atspi.StateType.ACTIVE)):
+                        continue
+                    queue = [(frame, 0)]
+                    seen = 0
+                    while queue and seen < 2400:
+                        item, depth = queue.pop(0)
+                        seen += 1
+                        if not item:
+                            continue
+                        try:
+                            state = item.get_state_set()
+                            if state.contains(Atspi.StateType.FOCUSED):
+                                if (state.contains(Atspi.StateType.EDITABLE)
+                                        or item.get_role_name() in (
+                                            'entry', 'password text',
+                                            'combo box')):
+                                    return False
+                            if depth < 12:
+                                for k in range(min(item.get_child_count(), 120)):
+                                    queue.append((item.get_child_at_index(k), depth + 1))
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        return True
     except Exception:
         return False
 

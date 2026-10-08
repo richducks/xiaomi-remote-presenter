@@ -37,14 +37,15 @@ class FakeUInput:
 
 
 class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
-    async def run_device(self,keys,pip=False,bridge=False):
+    async def run_device(self,keys,pip=False,bridge=False,youtube=False,mpris=False):
         remote=FakeRemote(keys)
         ui=FakeUInput()
         with patch.object(hid.UInput,'from_device',return_value=ui),\
              patch.object(hid,'browser_media_tab_focused',return_value=True),\
              patch.object(hid,'firefox_pip_focused',return_value=pip),\
              patch.object(hid,'route_firefox_pip_to_global_speed',return_value=bridge),\
-             patch.object(hid,'toggle_browser_play_pause',return_value=False),\
+             patch.object(hid,'toggle_browser_play_pause',return_value=mpris),\
+             patch.object(hid,'youtube_video_tab_focused',return_value=youtube),\
              patch.object(hid,'wps_presentation_is_focused',return_value=False),\
              patch.object(hid,'browser_window_focused',return_value=True):
             await hid.forward_device(remote)
@@ -228,7 +229,7 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
         ])
 
-    async def test_home_and_back_both_open_tabs_as_distinct_buttons(self):
+    async def test_home_opens_new_tab_and_back_navigates_previous_page(self):
         keys=[
             (ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0),
             (ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0),
@@ -240,7 +241,12 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_T,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
         ]
-        self.assertEqual(ui.writes,combo+combo)
+        self.assertEqual(ui.writes,combo+[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,0),
+        ])
         self.assertEqual(ui.syn_count,4)
         self.assertEqual(ui.fwd,[])
 
@@ -339,26 +345,26 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
         ])
 
-    async def test_browser_back_opens_one_new_tab(self):
+    async def test_browser_back_navigates_one_previous_page(self):
         keys=[(ecodes.KEY_BACK,1),(ecodes.KEY_BACK,2),
               (ecodes.KEY_BACK,2),(ecodes.KEY_BACK,0)]
         ui=await self.run_device(keys)
         self.assertEqual(ui.writes,[
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,0),
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,0),
         ])
         self.assertEqual(ui.syn_count,2)
         self.assertEqual(ui.fwd,[])
 
-    async def test_browser_back_no_release_does_not_stick_ctrl(self):
+    async def test_browser_back_no_release_does_not_stick_alt(self):
         ui=await self.run_device([(ecodes.KEY_BACK,1)])
         self.assertEqual(ui.writes,[
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,0),
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,0),
         ])
         self.assertEqual(ui.syn_count,2)
 
@@ -375,10 +381,10 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             await hid.forward_device(remote)
         self.assertEqual(is_browser.call_count,2)
         self.assertEqual(ui.writes,[
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,0),
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,0),
         ])
         self.assertEqual(ui.fwd,[
             (ecodes.EV_KEY,ecodes.KEY_BACK,1),
@@ -422,10 +428,10 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         ]
         ui=await self.run_device(keys)
         self.assertEqual(ui.writes,[
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,0),
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
             (ecodes.EV_KEY,ecodes.KEY_TAB,1),
             (ecodes.EV_KEY,ecodes.KEY_TAB,0),
@@ -548,10 +554,10 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_TAB,1),
             (ecodes.EV_KEY,ecodes.KEY_TAB,0),
             (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,1),
-            (ecodes.EV_KEY,ecodes.KEY_T,0),
-            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,0),
             (ecodes.EV_KEY,ecodes.KEY_D,1),
             (ecodes.EV_KEY,ecodes.KEY_D,0),
             (ecodes.EV_KEY,ecodes.KEY_A,1),
@@ -561,6 +567,58 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,1),
             (ecodes.EV_KEY,ecodes.KEY_VOLUMEUP,0),
         ])
+
+    async def test_youtube_ok_toggles_one_time_via_native_k(self):
+        for code in (ecodes.KEY_ENTER, ecodes.KEY_OK):
+            with self.subTest(code=code):
+                ui=await self.run_device([
+                    (code,1),(code,2),(code,2),(code,0)
+                ],youtube=True)
+                self.assertEqual(ui.writes,[
+                    (ecodes.EV_KEY,ecodes.KEY_K,1),
+                    (ecodes.EV_KEY,ecodes.KEY_K,0),
+                ])
+                self.assertEqual(ui.syn_count,2)
+                self.assertEqual(ui.fwd,[])
+
+    async def test_youtube_ok_without_release_releases_k(self):
+        ui=await self.run_device([(ecodes.KEY_ENTER,1)],youtube=True)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_K,1),
+            (ecodes.EV_KEY,ecodes.KEY_K,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+
+    async def test_youtube_ok_prefers_valid_mpris(self):
+        ui=await self.run_device([
+            (ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)
+        ],youtube=True,mpris=True)
+        self.assertEqual(ui.writes,[])
+        self.assertEqual(ui.fwd,[])
+
+    async def test_ok_non_youtube_non_mpris_keeps_enter(self):
+        ui=await self.run_device([
+            (ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)
+        ],youtube=False,mpris=False)
+        self.assertEqual(ui.writes,[])
+        self.assertEqual(ui.fwd,[
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
+        ])
+
+    async def test_wps_ok_still_maps_to_f5(self):
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'toggle_browser_play_pause',return_value=False),\
+             patch.object(hid,'youtube_video_tab_focused',return_value=False),\
+             patch.object(hid,'wps_presentation_is_focused',return_value=True):
+            await hid.forward_device(remote)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_F5,1),
+            (ecodes.EV_KEY,ecodes.KEY_F5,0),
+        ])
+        self.assertEqual(ui.fwd,[])
 
     async def test_wps_shortcuts_preserved(self):
         self.assertEqual(hid.OK_KEYS,{ecodes.KEY_ENTER,ecodes.KEY_OK})

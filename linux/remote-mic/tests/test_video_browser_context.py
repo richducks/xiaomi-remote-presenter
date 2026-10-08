@@ -72,6 +72,86 @@ class VideoBrowserContextTests(unittest.TestCase):
             browser.get_name.return_value='wechat'
             self.assertFalse(ctx.browser_window_focused())
 
+    def test_youtube_fallback_requires_foreground_watch_title_not_userscript(self):
+        import sys
+        from unittest.mock import patch
+        desktop=MagicMock()
+        atspi=MagicMock()
+        atspi.StateType.ACTIVE=5
+        atspi.StateType.FOCUSED=6
+        atspi.StateType.EDITABLE=7
+        frame=MagicMock()
+        frame.get_role_name.return_value='frame'
+        frame.get_state_set.return_value.contains.side_effect = (
+            lambda state: state == atspi.StateType.ACTIVE
+        )
+        frame.get_child_count.return_value=0
+        app=MagicMock()
+        app.get_name.return_value='Firefox'
+        app.get_child_count.return_value=1
+        app.get_child_at_index.return_value=frame
+        desktop.get_child_count.return_value=1
+        desktop.get_child_at_index.return_value=app
+        atspi.get_desktop.return_value=desktop
+        gi=MagicMock()
+        gi.repository.Atspi=atspi
+        youtube=('firefox','【全集】中文标题 - YouTube — Mozilla Firefox')
+        with patch.dict(sys.modules,{'gi':gi,'gi.repository':gi.repository}),\
+             patch.object(ctx,'active_browser_window',return_value=youtube),\
+             patch.object(ctx,'browser_media_tab_focused',return_value=True):
+            self.assertTrue(ctx.youtube_video_tab_focused())
+            # Chrome and Firefox both work even without the optional
+            # video userscript, and when translated titles mismatch MPRIS.
+            with patch.object(ctx,'browser_media_tab_focused',return_value=False):
+                self.assertTrue(ctx.youtube_video_tab_focused())
+            with patch.object(ctx,'active_browser_window',
+                              return_value=('firefox','YouTube — Mozilla Firefox')):
+                self.assertFalse(ctx.youtube_video_tab_focused())
+            with patch.object(ctx,'active_browser_window',
+                              return_value=('firefox','Settings — Mozilla Firefox')):
+                self.assertFalse(ctx.youtube_video_tab_focused())
+            with patch.object(ctx,'active_browser_window',
+                              return_value=('firefox','YouTube Music — Mozilla Firefox')):
+                self.assertFalse(ctx.youtube_video_tab_focused())
+            with patch.object(ctx,'active_browser_window',
+                              return_value=('firefox','Song - YouTube Music — Mozilla Firefox')):
+                self.assertFalse(ctx.youtube_video_tab_focused())
+            with patch.object(ctx,'active_browser_window',
+                              return_value=('chromium','Video - YouTube - Google Chrome')):
+                self.assertTrue(ctx.youtube_video_tab_focused())
+
+    def test_youtube_fallback_never_types_k_in_focused_search(self):
+        import sys
+        from unittest.mock import patch
+        desktop=MagicMock()
+        atspi=MagicMock()
+        atspi.StateType.ACTIVE=5
+        atspi.StateType.FOCUSED=6
+        atspi.StateType.EDITABLE=7
+        focused=MagicMock()
+        focused.get_role_name.return_value='entry'
+        focused.get_state_set.return_value.contains.return_value=True
+        focused.get_child_count.return_value=0
+        frame=MagicMock()
+        frame.get_role_name.return_value='frame'
+        frame.get_state_set.return_value.contains.return_value=True
+        frame.get_child_count.return_value=1
+        frame.get_child_at_index.return_value=focused
+        app=MagicMock()
+        app.get_name.return_value='Firefox'
+        app.get_child_count.return_value=1
+        app.get_child_at_index.return_value=frame
+        desktop.get_child_count.return_value=1
+        desktop.get_child_at_index.return_value=app
+        atspi.get_desktop.return_value=desktop
+        gi=MagicMock()
+        gi.repository.Atspi=atspi
+        with patch.dict(sys.modules,{'gi':gi,'gi.repository':gi.repository}),\
+             patch.object(ctx,'active_browser_window',
+                          return_value=('firefox','Video - YouTube — Mozilla Firefox')),\
+             patch.object(ctx,'browser_media_tab_focused',return_value=True):
+            self.assertFalse(ctx.youtube_video_tab_focused())
+
     def test_active_browser_selection(self):
         states = MagicMock()
         atspi = MagicMock()

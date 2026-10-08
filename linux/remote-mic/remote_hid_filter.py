@@ -15,7 +15,7 @@ from evdev import InputDevice, UInput, ecodes, list_devices
 
 from video_browser_context import (
     browser_media_tab_focused, firefox_pip_focused, toggle_browser_play_pause,
-    browser_window_focused,
+    browser_window_focused, youtube_video_tab_focused,
 )
 
 LOG = logging.getLogger('xiaomi-remote-hid-filter')
@@ -37,7 +37,7 @@ HOME_KEYS = {ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW}
 # KEY_TV, which is absent from this RC003 device capability list.
 # The device VID/PID filter keeps the PC keyboard unaffected.
 TV_KEYS = {ecodes.KEY_GRAVE}
-NEW_TAB_KEYS = HOME_KEYS | BACK_KEYS
+NEW_TAB_KEYS = HOME_KEYS
 CLOSE_TAB_KEYS = TV_KEYS
 # Standard HID keyboard Application/Menu key (usage 0x65), advertised
 # as KEY_COMPOSE by this RC003 keyboard. Do not remap unrelated keys.
@@ -296,6 +296,7 @@ async def forward_device(dev: InputDevice) -> None:
     swallowed_close_tab: set[int] = set()
     swallowed_menu: set[int] = set()
     swallowed_browser_new_tab: set[int] = set()
+    swallowed_browser_back: set[int] = set()
     # HOME and WWW may be reported together by one physical press.
     last_home_new_tab_at = -float('inf')
     wps_resume_until = 0.0
@@ -304,7 +305,7 @@ async def forward_device(dev: InputDevice) -> None:
         dev.grab()
         LOG.info(
             'grabbed %s %s vendor=%04x product=%04x; '
-            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home/Back->Ctrl+T TV->Ctrl+W MENU->Ctrl+Tab; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
+            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home->Ctrl+T TV->Ctrl+W MENU->Ctrl+Tab BACK->Alt+Left; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
             dev.path, dev.name, VID, PID,
         )
 
@@ -341,37 +342,56 @@ async def forward_device(dev: InputDevice) -> None:
                                  ecodes.KEY[ev.code])
                         continue
 
+                if ev.code in BACK_KEYS:
+                    # Browser Back navigates history with Alt+Left.
+                    # WPS Back->Esc below must remain intact. Generate a
+                    # balanced shortcut immediately on key-down, consuming
+                    # physical repeats and the matching release even if
+                    # focus changes during navigation.
+                    if ev.code in swallowed_browser_back:
+                        if ev.value == 0:
+                            swallowed_browser_back.remove(ev.code)
+                        continue
+                    if ev.value == 1 and await asyncio.to_thread(browser_window_focused):
+                        swallowed_browser_back.add(ev.code)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTALT, 1)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFT, 1)
+                        ui.syn()
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFT, 0)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTALT, 0)
+                        ui.syn()
+                        LOG.info("browser Back %s -> Alt+Left (previous page)",
+                                 ecodes.KEY[ev.code])
+                        continue
+                    # Outside browsers, preserve the original WPS/Back path.
+
                 if ev.code in NEW_TAB_KEYS:
-                    # Both the house-shaped Home key and browser Back
-                    # create one tab with Ctrl+T. Keep WPS Back->Esc below,
-                    # and pass ordinary Home/Back to non-browser apps.
-                    # Decide on key down, suppress physical repeat/release
-                    # regardless of a focus change caused by the new tab.
+                    # The house-shaped Home key creates one tab with Ctrl+T.
+                    # Pass ordinary Home events to non-browser apps.
+                    # Decide on key-down, suppress physical repeats/releases
+                    # even if opening the tab changes browser focus.
                     if ev.code in swallowed_browser_new_tab:
                         if ev.value == 0:
                             swallowed_browser_new_tab.remove(ev.code)
                         continue
                     if ev.value == 1 and await asyncio.to_thread(browser_window_focused):
                         swallowed_browser_new_tab.add(ev.code)
-                        if ev.code in HOME_KEYS:
-                            # Some Xiaomi firmware reports HOME + WWW for
-                            # one press. Do not coalesce independent Back
-                            # and Home buttons, or TV's close-tab action.
-                            now = time.monotonic()
-                            if now - last_home_new_tab_at < 0.18:
-                                LOG.info("browser Home duplicate suppressed: %s",
-                                         ecodes.KEY[ev.code])
-                                continue
-                            last_home_new_tab_at = now
+                        # Some Xiaomi firmware reports HOME + WWW for
+                        # one press. Do not coalesce independent Back or TV.
+                        now = time.monotonic()
+                        if now - last_home_new_tab_at < 0.18:
+                            LOG.info("browser Home duplicate suppressed: %s",
+                                     ecodes.KEY[ev.code])
+                            continue
+                        last_home_new_tab_at = now
                         ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
                         ui.write(ecodes.EV_KEY, ecodes.KEY_T, 1)
                         ui.syn()
                         ui.write(ecodes.EV_KEY, ecodes.KEY_T, 0)
                         ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
                         ui.syn()
-                        label = "Home" if ev.code in HOME_KEYS else "Back"
-                        LOG.info("browser %s %s -> Ctrl+T (new tab)",
-                                 label, ecodes.KEY[ev.code])
+                        LOG.info("browser Home %s -> Ctrl+T (new tab)",
+                                 ecodes.KEY[ev.code])
                         continue
 
                 if ev.code in CLOSE_TAB_KEYS:
@@ -437,17 +457,29 @@ async def forward_device(dev: InputDevice) -> None:
                             continue
 
                 if ev.code in OK_KEYS:
-                    # A successful MPRIS PlayPause call acts on the *foreground*
-                    # media tab. Swallow the physical down/repeat/up sequence to
-                    # avoid double toggles, while preserving WPS F5 elsewhere.
+                    # Prefer the foreground video's MPRIS PlayPause. YouTube
+                    # sometimes translates its window title but not MPRIS
+                    # metadata; if that match fails, press YouTube's native
+                    # K playback toggle ONLY for its foreground video page.
+                    # Suppress repeat/up after success, preventing a double
+                    # toggle even if page focus changes after playback.
                     if ev.code in swallowed_ok:
                         if ev.value == 0:
                             swallowed_ok.remove(ev.code)
                         continue
-                    if ev.value == 1 and await asyncio.to_thread(toggle_browser_play_pause):
-                        swallowed_ok.add(ev.code)
-                        LOG.info("browser video OK -> PlayPause via MPRIS")
-                        continue
+                    if ev.value == 1:
+                        if await asyncio.to_thread(toggle_browser_play_pause):
+                            swallowed_ok.add(ev.code)
+                            LOG.info("browser video OK -> PlayPause via MPRIS")
+                            continue
+                        if await asyncio.to_thread(youtube_video_tab_focused):
+                            swallowed_ok.add(ev.code)
+                            ui.write(ecodes.EV_KEY, ecodes.KEY_K, 1)
+                            ui.syn()
+                            ui.write(ecodes.EV_KEY, ecodes.KEY_K, 0)
+                            ui.syn()
+                            LOG.info("YouTube video OK -> KEY_K PlayPause fallback")
+                            continue
 
                 if ev.code in OK_KEYS or ev.code in BACK_KEYS:
                     target = ecodes.KEY_F5 if ev.code in OK_KEYS else ecodes.KEY_ESC
