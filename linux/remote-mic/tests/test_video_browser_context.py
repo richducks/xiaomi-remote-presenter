@@ -29,6 +29,49 @@ class VideoBrowserContextTests(unittest.TestCase):
         self.assertFalse(ctx.is_firefox_pip_window('firefox','夸克网盘 — Mozilla Firefox'))
         self.assertFalse(ctx.is_firefox_pip_window('chromium','画中画'))
 
+    def test_home_close_supported_standalone_browsers(self):
+        for app in (
+            "Firefox", "Mozilla Firefox", "Firefox Nightly",
+            "Google Chrome", "Chromium", "Microsoft Edge",
+            "Brave Browser", "Opera", "Opera GX", "Vivaldi",
+            "LibreWolf", "Waterfox", "Floorp", "Zen Browser",
+            "Tor Browser", "GNOME Web", "Epiphany", "Falkon",
+            "qutebrowser", "Midori",
+        ):
+            with self.subTest(app=app):
+                self.assertTrue(ctx.is_browser_application(app))
+        for other in ("wechat", "Codex", "WPS Office", "Files", "GNOME Terminal",
+                      "Firefox Issue - Terminal", "Browser Downloader",
+                      "Web Browser Demo"):
+            with self.subTest(non_browser=other):
+                self.assertFalse(ctx.is_browser_application(other))
+
+    def test_home_close_browser_detection_requires_active_frame(self):
+        import sys
+        from unittest.mock import patch
+        desktop=MagicMock()
+        atspi=MagicMock()
+        atspi.StateType.ACTIVE=999
+        active=MagicMock()
+        active.get_role_name.return_value='frame'
+        active.get_state_set.return_value.contains.return_value=True
+        browser=MagicMock()
+        browser.get_name.return_value='Microsoft Edge'
+        browser.get_child_count.return_value=1
+        browser.get_child_at_index.return_value=active
+        desktop.get_child_count.return_value=1
+        desktop.get_child_at_index.return_value=browser
+        gi=MagicMock()
+        gi.repository.Atspi=atspi
+        atspi.get_desktop.return_value=desktop
+        with patch.dict(sys.modules,{"gi":gi,"gi.repository":gi.repository}):
+            self.assertTrue(ctx.browser_window_focused())
+            active.get_state_set.return_value.contains.return_value=False
+            self.assertFalse(ctx.browser_window_focused())
+            active.get_state_set.return_value.contains.return_value=True
+            browser.get_name.return_value='wechat'
+            self.assertFalse(ctx.browser_window_focused())
+
     def test_active_browser_selection(self):
         states = MagicMock()
         atspi = MagicMock()

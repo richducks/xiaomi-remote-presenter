@@ -15,6 +15,7 @@ from evdev import InputDevice, UInput, ecodes, list_devices
 
 from video_browser_context import (
     browser_media_tab_focused, firefox_pip_focused, toggle_browser_play_pause,
+    browser_window_focused,
 )
 
 LOG = logging.getLogger('xiaomi-remote-hid-filter')
@@ -27,6 +28,10 @@ FILTER_NAME = 'Xiaomi Remote 2 Pro Filtered'
 BLOCK_KEY = ecodes.KEY_F5
 OK_KEYS = {ecodes.KEY_ENTER, ecodes.KEY_OK}
 BACK_KEYS = {ecodes.KEY_BACK}
+# Xiaomi remote exposes KEY_HOME and KEY_WWW in its physical HID map;
+# firmware variants can use either for the house-shaped Home/browser key.
+# Some other keyboards use KEY_HOMEPAGE. All stay untouched outside browsers.
+HOME_KEYS = {ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW}
 
 # Single speed engine: Firefox/Chrome Global Speed extension.
 # ONLY the remote round D-pad UP/DOWN is remapped to the extension's
@@ -278,13 +283,17 @@ async def forward_device(dev: InputDevice) -> None:
     blocked = 0
     mapped_down: dict[int, int] = {}
     swallowed_ok: set[int] = set()
+    swallowed_home: set[int] = set()
+    # The remote advertises both KEY_HOME and KEY_WWW. Guard against
+    # firmware emitting both for the same physical press.
+    last_home_close_at = -float('inf')
     wps_resume_until = 0.0
 
     try:
         dev.grab()
         LOG.info(
             'grabbed %s %s vendor=%04x product=%04x; '
-            'physical F5 blocked; WPS OK->F5 BACK->ESC; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
+            'physical F5 blocked; WPS OK->F5 BACK->ESC; browser Home->Ctrl+W; Global Speed D/A + PiP helper; physical volume untouched; OK->PlayPause',
             dev.path, dev.name, VID, PID,
         )
 
@@ -298,6 +307,36 @@ async def forward_device(dev: InputDevice) -> None:
                         ev.value, blocked,
                     )
                     continue
+
+                if ev.code in HOME_KEYS:
+                    # A short, balanced Ctrl+W closes exactly one *foreground*
+                    # browser tab. Emit separate SYN frames for key down/up;
+                    # releasing modifiers immediately avoids sticky Ctrl if
+                    # closing the tab changes focus or the remote disconnects.
+                    # Swallow the physical release and any key-repeat so a
+                    # long press cannot close additional tabs.
+                    if ev.code in swallowed_home:
+                        if ev.value == 0:
+                            swallowed_home.remove(ev.code)
+                        continue
+                    if ev.value == 1 and await asyncio.to_thread(browser_window_focused):
+                        swallowed_home.add(ev.code)
+                        now = time.monotonic()
+                        if now - last_home_close_at < 0.18:
+                            LOG.info("browser Home duplicate suppressed: %s",
+                                     ecodes.KEY[ev.code])
+                            continue
+                        last_home_close_at = now
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_W, 1)
+                        ui.syn()
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_W, 0)
+                        ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
+                        ui.syn()
+                        LOG.info("browser Home %s -> Ctrl+W (close current tab)",
+                                 ecodes.KEY[ev.code])
+                        continue
+                    # Non-browser foreground: pass original Home key unchanged.
 
                 if ev.code in VIDEO_RATE_KEYS:
                     # ONLY Firefox native PiP: request a Global Speed

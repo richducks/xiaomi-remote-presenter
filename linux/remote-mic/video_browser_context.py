@@ -16,6 +16,62 @@ if '/usr/lib/python3/dist-packages' not in sys.path:
     sys.path.append('/usr/lib/python3/dist-packages')
 
 
+# Trusted *application* names from Linux accessibility (AT-SPI), not window
+# titles. A terminal or file manager may have "Firefox" in its title, but
+# must never be treated as a browser or receive Ctrl+W from the remote.
+_BROWSER_APP_NAMES = frozenset({
+    'firefox', 'mozilla firefox', 'firefox nightly',
+    'firefox developer edition', 'firefox esr',
+    'google chrome', 'google chrome beta', 'google chrome dev',
+    'google chrome unstable', 'chrome', 'chromium', 'chromium browser',
+    'ungoogled chromium', 'ungoogled-chromium',
+    'microsoft edge', 'microsoft edge beta', 'microsoft edge dev',
+    'microsoft edge canary',
+    'brave', 'brave browser', 'brave browser beta',
+    'opera', 'opera gx', 'opera beta', 'opera developer',
+    'vivaldi', 'vivaldi stable', 'vivaldi snapshot',
+    'librewolf', 'waterfox', 'floorp', 'zen', 'zen browser',
+    'tor browser', 'epiphany', 'gnome web', 'web', 'midori',
+    'qutebrowser', 'falkon', 'yandex browser',
+})
+
+
+def is_browser_application(app_name: str) -> bool:
+    """Only match known standalone web browsers, never tabs or window titles."""
+    normalized = ' '.join((app_name or '').strip().casefold().split())
+    return normalized in _BROWSER_APP_NAMES
+
+
+def browser_window_focused() -> bool:
+    """Whether the *foreground window* belongs to a supported web browser.
+
+    Does not require playback/MPRIS, so Home -> Ctrl+W also works on ordinary
+    pages such as new tabs, articles and sites without media support.
+    """
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            try:
+                if not is_browser_application(app.get_name()):
+                    continue
+                for j in range(app.get_child_count()):
+                    frame = app.get_child_at_index(j)
+                    if (frame.get_role_name() == 'frame' and
+                            frame.get_state_set().contains(Atspi.StateType.ACTIVE)):
+                        return True
+            except Exception:
+                continue
+        return False
+    except Exception:
+        # Fail closed: leave the physical Home key unchanged if the desktop
+        # accessibility service is unavailable.
+        return False
+
+
 def active_browser_window(desktop: Any, atspi: Any) -> tuple[str, str] | None:
     """Return (MPRIS player prefix, active browser window title)."""
     for i in range(desktop.get_child_count()):
