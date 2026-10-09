@@ -1,0 +1,55 @@
+{
+  "title": "Xiaomi Remote 2 Pro · 视频 OK（可选，浏览器占用 Enter）",
+  "rules": [
+    {
+      "description": "视频播放（可选）: OK -> F13，仅在浏览器",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "return_or_enter",
+            "modifiers": {
+              "optional": [
+                "any"
+              ]
+            }
+          },
+          "conditions": [
+            {
+              "type": "device_if",
+              "identifiers": [
+                {
+                  "vendor_id": 10007,
+                  "product_id": 12984
+                }
+              ]
+            },
+            {
+              "type": "frontmost_application_if",
+              "bundle_identifiers": [
+                "^com\\.apple\\.Safari$",
+                "^org\\.mozilla\\.firefox$",
+                "^org\\.mozilla\\.firefoxdeveloperedition$",
+                "^org\\.mozilla\\.nightly$",
+                "^com\\.google\\.Chrome(?:\\.beta|\\.dev|\\.canary)?$",
+                "^com\\.microsoft\\.edgemac(?:\\.Beta|\\.Dev|\\.Canary)?$",
+                "^com\\.brave\\.Browser(?:\\.beta|\\.nightly)?$",
+                "^com\\.operasoftware\\.Opera(?:Next)?$",
+                "^com\\.vivaldi\\.Vivaldi$",
+                "^org\\.chromium\\.Chromium$",
+                "^org\\.torproject\\.TorBrowser$",
+                "^org\\.mozilla\\.librewolf$"
+              ]
+            }
+          ],
+          "to": [
+            {
+              "key_code": "f13",
+              "repeat": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

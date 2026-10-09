@@ -5,7 +5,38 @@
 Windows 使用 AutoHotkey v2 和 AutoHotInterception，通过设备
 VID=0x2717、PID=0x32B8 过滤输入事件，仅修改这只小米遥控器。
 
-## 按键表
+## 推荐部署：SAFE 浏览器配置（默认）
+
+当前推荐 **`xiaomi_remote_safe.ahk`**。它只为小米遥控器映射
+**小房子→Ctrl+T、三横杠菜单→Ctrl+Tab、TV→Ctrl+W**；WPS、
+系统键盘、非视频浏览器输入框里的 Enter、返回键均不修改。
+在前台窗口标题识别到 YouTube/B 站/抖音/夸克等视频网站时，才将
+遥控器 OK 映射为 F13（需视频用户脚本），圆盘上/下映射到
+Global Speed 的 D/A。注意：**仅凭标题不能识别真实视频**；
+视频网站中即使焦点落在输入框，遥控器 Enter 也可能被映射。
+因此 Windows SAFE 是降低干扰风险，尚非与 Linux 一样精确的视频上下文识别。
+
+在 Windows 10/11 配对遥控器并安装 AutoHotkey v2 后，从仓库的
+`windows` 目录执行 PowerShell：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1 -InstallDriver
+```
+
+上面的命令默认部署 SAFE，驱动安装时需要管理员授权，完成后重启 Windows。
+若驱动已安装，则运行 `.\install.ps1` 更新配置（无需再次加
+`-InstallDriver`）。用户登录启动项会指向安装目录中的安全脚本；
+更新前的版本保存在 `%LOCALAPPDATA%\XiaomiRemotePresenter\backups`，
+当前模式记录在 `profile.txt`。升级已有运行实例后需要退出旧 AHK
+实例并重新运行，或者注销后登录。
+
+**仅当确实需要 PPT/WPS 放映、浏览器后退等旧版功能时**
+才使用 `.\install.ps1 -FullMode`，明确承担更广泛的映射风险。
+同一时间仅运行一套 AHK 映射实例，切勿双开。
+Linux 独有的原生 Firefox 画中画辅助桥尚未移植到 Windows。
+
+## 旧版完整映射按键表（需 -FullMode）
 
 | 遥控器 | 浏览器 | WPS / PowerPoint / Impress | 其他应用 |
 |---|---|---|---|
@@ -21,7 +52,7 @@ Windows 浏览器视频站点识别基于窗口标题，已列入 YouTube、Bili
 抖音、夸克、Netflix 等；不是检测正在播放的真实视频。
 不符合标题规则的网页保持原始方向键，不保证所有网站变速。
 
-## 安装
+## 依赖与视频扩展配置（SAFE 与完整模式通用）
 
 1. Windows 10/11 蓝牙配对小米遥控器 2 Pro。
 2. 安装 [AutoHotkey v2](https://www.autohotkey.com/)。

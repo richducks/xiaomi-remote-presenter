@@ -1,6 +1,7 @@
 param(
     [switch]$InstallDriver,
-    [switch]$NoStartup
+    [switch]$NoStartup,
+    [switch]$FullMode
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,8 +64,21 @@ New-Item -ItemType Directory -Path (Join-Path $LibDir "x86") -Force | Out-Null
 Copy-Item (Join-Path $InterceptionExtract "Interception\library\x64\interception.dll") (Join-Path $LibDir "x64\interception.dll") -Force
 Copy-Item (Join-Path $InterceptionExtract "Interception\library\x86\interception.dll") (Join-Path $LibDir "x86\interception.dll") -Force
 
-$SourceScript = Join-Path $PSScriptRoot "xiaomi_remote_presenter.ahk"
-Copy-Item $SourceScript (Join-Path $InstallDir "xiaomi_remote_presenter.ahk") -Force
+# SAFE profile is the default. Full presenter mapping is explicit opt-in.
+$SourceName = if ($FullMode) { "xiaomi_remote_presenter.ahk" } else { "xiaomi_remote_safe.ahk" }
+$SourceScript = Join-Path $PSScriptRoot $SourceName
+$ControllerPath = Join-Path $InstallDir "xiaomi_remote_presenter.ahk"
+$OldProfile = Join-Path $InstallDir "profile.txt"
+if (Test-Path $ControllerPath) {
+    $BackupDir = Join-Path $InstallDir "backups"
+    New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+    $TimeTag = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+    Copy-Item $ControllerPath (Join-Path $BackupDir "xiaomi_remote_presenter.$TimeTag.ahk") -Force
+}
+Copy-Item $SourceScript $ControllerPath -Force
+@("mode=" + $(if ($FullMode) { "full" } else { "safe" }), "script=$SourceName") |
+    Set-Content -Path $OldProfile -Encoding UTF8
+Copy-Item (Join-Path $PSScriptRoot "xiaomi_remote_safe.ahk") (Join-Path $InstallDir "xiaomi_remote_safe.ahk") -Force
 
 # Keep the browser companion beside the installed controller so the user
 # can import it without looking for the Git checkout.
@@ -96,6 +110,9 @@ if (-not $NoStartup) {
 Write-Host ""
 Write-Host "Installed to: $InstallDir"
 Write-Host "AutoHotkey: $AhkExe"
+Write-Host ("Active mapping profile: " + $(if ($FullMode) { "FULL (opt-in)" } else { "SAFE (default)" }))
+Write-Host "To switch profiles, rerun the installer with or without -FullMode."
+Write-Host "Previously installed controller scripts are backed up in $InstallDir\backups"
 Write-Host ""
 if (-not $InstallDriver) {
     Write-Warning "The Interception driver was not installed by this run."
@@ -106,6 +123,8 @@ if (-not $InstallDriver) {
     Write-Host "Reboot Windows once, then the controller will start at login."
 }
 
-Write-Host "Browser OK uses F13. Import the userscript into Tampermonkey or Violentmonkey:"
+Write-Host "Browser video OK uses F13 only on recognized video-page titles in SAFE mode."
+Write-Host "Titles are heuristic; on unrelated sites Enter is untouched."
+Write-Host "Import the userscript into Tampermonkey or Violentmonkey:"
 Write-Host ("  " + (Join-Path $InstallDir "browser\xiaomi-remote-video.user.js"))
 Write-Host "Global Speed D/A is triggered only on recognized video sites."

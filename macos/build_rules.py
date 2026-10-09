@@ -91,6 +91,36 @@ def build_core() -> dict:
     ]}
 
 
+def build_safe() -> dict:
+    """Safe default: browser tab actions only; no Enter, Back, WPS or F5."""
+    return {"title": "Xiaomi Remote 2 Pro SAFE · 浏览器标签页（默认）", "rules": [
+        rule("Xiaomi Remote 2 Pro SAFE · 小房子新建标签页 Cmd+T",
+             [input_key("home"), input_key("ac_home", consumer=True)],
+             output_key("t", ["left_command"]), BROWSERS),
+        rule("Xiaomi Remote 2 Pro SAFE · TV 关闭标签页 Cmd+W",
+             [input_key("grave_accent_and_tilde")],
+             output_key("w", ["left_command"]), BROWSERS),
+        rule("Xiaomi Remote 2 Pro SAFE · 菜单切换标签 Control+Tab",
+             [input_key("application")],
+             output_key("tab", ["left_control"]), BROWSERS),
+    ]}
+
+
+def build_optional_video_ok() -> dict:
+    """Optional: Karabiner cannot detect an active HTML5 video frame.
+
+    Enabling this rule intercepts the remote's Enter in ALL browser tabs.
+    The userscript only plays/pauses active video, but regular remote Enter
+    no longer reaches browser input fields. Never enable automatically.
+    """
+    return {"title": "Xiaomi Remote 2 Pro · 视频 OK（可选，浏览器占用 Enter）",
+            "rules": [
+                rule("视频播放（可选）: OK -> F13，仅在浏览器",
+                     [input_key("return_or_enter")],
+                     output_key("f13"), BROWSERS),
+            ]}
+
+
 def build_optional_speed() -> dict:
     return {"title": "Xiaomi 2 Pro · Global Speed 视频模式（可选，浏览器占用方向键）",
             "rules": [
@@ -104,6 +134,8 @@ def build_optional_speed() -> dict:
 def main() -> None:
     for filename, content in [
         ("xiaomi-remote-presenter.json", build_core()),
+        ("xiaomi-remote-safe.json", build_safe()),
+        ("xiaomi-remote-video-ok.json", build_optional_video_ok()),
         ("xiaomi-remote-video-speed.json", build_optional_speed()),
     ]:
         out = ROOT / filename

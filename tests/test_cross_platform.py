@@ -21,18 +21,24 @@ class CrossPlatformMappings(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.windows = (ROOT / "windows/xiaomi_remote_presenter.ahk").read_text()
+        cls.win_safe = (ROOT / "windows/xiaomi_remote_safe.ahk").read_text()
         cls.linux = (ROOT / "linux/remote-mic/remote_hid_filter.py").read_text()
+        cls.linux_safe = (ROOT / "linux/remote-mic/video_only_hid.py").read_text()
         cls.core = json.loads((ROOT / "macos/xiaomi-remote-presenter.json").read_text())
+        cls.safe = json.loads((ROOT / "macos/xiaomi-remote-safe.json").read_text())
+        cls.video_ok = json.loads((ROOT / "macos/xiaomi-remote-video-ok.json").read_text())
         cls.speed = json.loads((ROOT / "macos/xiaomi-remote-video-speed.json").read_text())
         cls.browser_script = (ROOT / "browser/xiaomi-remote-video.user.js").read_text()
         cls.manual = (ROOT / "docs/中文使用手册.md").read_text()
 
     def test_mac_json_is_reproducible_not_hand_drifted(self):
         self.assertEqual(self.core, build_rules.build_core())
+        self.assertEqual(self.safe, build_rules.build_safe())
+        self.assertEqual(self.video_ok, build_rules.build_optional_video_ok())
         self.assertEqual(self.speed, build_rules.build_optional_speed())
 
     def test_mac_all_mappings_are_xiaomi_only(self):
-        for data in (self.core, self.speed):
+        for data in (self.core, self.safe, self.video_ok, self.speed):
             for rule in data["rules"]:
                 for item in rule["manipulators"]:
                     devices = [condition for condition in item.get("conditions", [])
@@ -56,6 +62,46 @@ class CrossPlatformMappings(unittest.TestCase):
         self.assertTrue(any(c["type"] == "frontmost_application_if"
                             for c in item["conditions"]))
         return item["to"][0]
+
+    def test_safe_macos_only_three_browser_shortcuts(self):
+        self.assertEqual(len(self.safe["rules"]), 3)
+        for rule in self.safe["rules"]:
+            for item in rule["manipulators"]:
+                self.assertTrue(any(c["type"] == "frontmost_application_if"
+                                    for c in item["conditions"]))
+        s = json.dumps(self.safe)
+        for forbidden in ('"return_or_enter"', '"ac_back"', '"f5"', '"up_arrow"'):
+            self.assertNotIn(forbidden, s)
+        for key, target in (("home", "t"), ("grave_accent_and_tilde", "w"),
+                            ("application", "tab")):
+            result = [r["to"][0] for rule in self.safe["rules"]
+                      for r in rule["manipulators"]
+                      if r["from"].get("key_code") == key]
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["key_code"], target)
+
+    def test_safe_windows_limits_enter_to_video_page_and_not_wps(self):
+        for marker in (
+            "#HotIf RemoteContext.IsActive && IsBrowser()",
+            "#HotIf RemoteContext.IsActive && IsVideoPage()",
+            'Home::SendOnce("Home", "^t")',
+            'SC029::SendOnce("SC029", "^w")',
+            'AppsKey::SendOnce("AppsKey", "^{Tab}")',
+            'Enter::SendOnce("Enter", "{F13}")',
+        ):
+            self.assertIn(marker, self.win_safe)
+        self.assertNotIn("IsPresentationEditor()", self.win_safe)
+        self.assertNotIn("Browser_Back::", self.win_safe)
+        self.assertNotIn('Enter::SendOnce("Enter", "{F5}")', self.win_safe)
+        installer = (ROOT / "windows/install.ps1").read_text()
+        self.assertIn("xiaomi_remote_safe.ahk", installer)
+        self.assertIn("[switch]$FullMode", installer)
+
+    def test_linux_safe_has_browser_mapping_without_enter_override(self):
+        self.assertIn("BROWSER_TAB_KEYS", self.linux_safe)
+        self.assertIn("browser_window_focused", self.linux_safe)
+        self.assertIn("ui.write_event(event)", self.linux_safe)
+        self.assertNotIn("ensure_wps_editor_focus", self.linux_safe)
 
     def test_mac_browser_shortcuts(self):
         self.assertEqual(self.mac_mapping("小房子新建", "home")["key_code"], "t")

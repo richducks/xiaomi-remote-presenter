@@ -13,6 +13,7 @@ jobs:
       - name: Validate Linux scripts and Python
         run: |
           bash -n linux/install.sh linux/uninstall.sh linux/diagnose.sh
+          bash -n linux/remote-mic/pin-linux-safe.sh
           python3 -m py_compile linux/remote_hid_filter.py
           bash -n macos/install.sh
 
@@ -53,6 +54,38 @@ jobs:
       - name: Validate AutoHotkey device and browser contract
         shell: powershell
         run: |
+          $safe = Get-Content windows/xiaomi_remote_safe.ahk -Raw
+          $safeNeed = @(
+            '#Requires AutoHotkey v2.0',
+            'GetKeyboardId(VID, PID, 1)',
+            'CreateContextManager(KeyboardId)',
+            '#HotIf RemoteContext.IsActive && IsBrowser()',
+            'Home::SendOnce("Home", "^t")',
+            'SC029::SendOnce("SC029", "^w")',
+            'AppsKey::SendOnce("AppsKey", "^{Tab}")',
+            '#HotIf RemoteContext.IsActive && IsVideoPage()',
+            'Enter::SendOnce("Enter", "{F13}")',
+            'Up::SendOnce("Up", "d")',
+            'Down::SendOnce("Down", "a")'
+          )
+          foreach ($item in $safeNeed) {
+            if (-not $safe.Contains($item)) {
+              Write-Error "Missing SAFE Windows mapping: $item"
+              exit 1
+            }
+          }
+          if ($safe.Contains('IsPresentationEditor()') -or
+              $safe.Contains('Browser_Back::') -or
+              $safe.Contains('Enter::SendOnce("Enter", "{F5}")')) {
+            Write-Error "SAFE Windows script unexpectedly intercepts legacy presentation or Back"
+            exit 1
+          }
+          $installer = Get-Content windows/install.ps1 -Raw
+          if (-not $installer.Contains('xiaomi_remote_safe.ahk') -or
+              -not $installer.Contains('[switch]$FullMode')) {
+            Write-Error "Windows installer must default to SAFE and retain explicit FullMode"
+            exit 1
+          }
           $s = Get-Content windows/xiaomi_remote_presenter.ahk -Raw
           $need = @(
             '#Requires AutoHotkey v2.0',
@@ -88,8 +121,10 @@ jobs:
         run: |
           bash -n macos/install.sh
           python3 macos/build_rules.py
-          git diff --exit-code -- macos/xiaomi-remote-presenter.json macos/xiaomi-remote-video-speed.json
+          git diff --exit-code -- macos/xiaomi-remote-presenter.json macos/xiaomi-remote-safe.json macos/xiaomi-remote-video-ok.json macos/xiaomi-remote-video-speed.json
           python3 -m json.tool macos/xiaomi-remote-presenter.json >/dev/null
+          python3 -m json.tool macos/xiaomi-remote-safe.json >/dev/null
+          python3 -m json.tool macos/xiaomi-remote-video-ok.json >/dev/null
           python3 -m json.tool macos/xiaomi-remote-video-speed.json >/dev/null
 
       - name: Mac device/app and optional speed contracts

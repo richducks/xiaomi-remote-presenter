@@ -6,7 +6,7 @@ Turn a **Xiaomi Remote 2 Pro / Xiaomi Bluetooth Voice Remote** into a device-spe
 
 The key design rule is: **never globally remap Enter/Back**. The remote reports OK as an Enter-like key, so each operating system uses a device-aware input layer.
 
-**Linux video-only safety profile (recommended, 2026-10-09):** the [standalone video HID service](linux/remote-mic/README.md#2026-10-09视频安全模式推荐) controls only foreground video playback/speed and preserves all non-video keys, including Enter, unchanged. Install with `bash install-services.sh --enable-video`. The legacy full presenter mapping is opt-in and must never run concurrently with this profile.
+**Recommended SAFE profile (2026-10-09):** browser-only Home → new tab, Menu → next tab, TV → close tab, with ordinary Enter unaffected. [Linux](linux/remote-mic/README.md): run `bash install-services.sh --enable-video` (also handles video playback/speed) and optionally `bash pin-linux-safe.sh --backup` to persist a local rollback snapshot. [Windows](windows/README.md): `windows/install.ps1 -InstallDriver` defaults to `xiaomi_remote_safe.ahk`. [macOS](macos/README.md): `macos/install.sh --enable-safe` installs the device-scoped safe Karabiner rules with a configuration backup. The legacy full presentation/back mappings are opt-in. macOS video OK/speed require optional rules and may capture Enter/arrow keys even outside videos.
 
 ## Platform matrix
 
@@ -23,12 +23,12 @@ The key design rule is: **never globally remap Enter/Back**. The remote reports 
 | Home (house) | Ctrl+T: new tab | Command+T |
 | TV | Ctrl+W: close tab | Command+W |
 | Menu (three lines) | Ctrl+Tab: next tab | Control+Tab |
-| Back | Alt+Left: previous page | Command+[ |
-| OK | Browser video play/pause | Browser video play/pause |
-| Round Up/Down | Global Speed D/A (video-context limitations) | Optional Global Speed D/A mode |
+| Back | Unchanged in SAFE (legacy mode adds Alt+Left) | Unchanged in SAFE (legacy mode adds Command+[) |
+| OK | Linux: foreground video only; Windows: title-recognized video only | Unchanged in SAFE; optional video rule captures browser Enter |
+| Round Up/Down | Linux: video-context D/A; Windows: title-recognized video D/A | Unchanged in SAFE; optional all-browser D/A mode |
 | Volume +/- | Unchanged | Unchanged |
 
-For presentation apps: OK starts slideshow; Back sends Esc.
+For presentation apps: SAFE passes original keys unchanged. Full presenter mode is optional.
 Only the Xiaomi remote is remapped; ordinary keyboards remain untouched.
 
 Browser OK on Windows/macOS requires
