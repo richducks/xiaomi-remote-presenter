@@ -596,15 +596,121 @@ class HIDEventPipelineRegression(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui.writes,[])
         self.assertEqual(ui.fwd,[])
 
-    async def test_ok_non_youtube_non_mpris_keeps_enter(self):
+    async def test_ok_non_youtube_non_mpris_sends_single_enter_pulse(self):
         ui=await self.run_device([
             (ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)
         ],youtube=False,mpris=False)
-        self.assertEqual(ui.writes,[])
-        self.assertEqual(ui.fwd,[
+        self.assertEqual(ui.writes,[
             (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
             (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
         ])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_ok_opening_wps_drops_autorepeat_after_focus_change(self):
+        # The key-down can start in a file manager and open the PPT. Any
+        # hardware autorepeat arriving after WPS takes focus must not become
+        # Enter inside the thumbnail pane, where it creates a new slide.
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),
+              (ecodes.KEY_ENTER,2),(ecodes.KEY_ENTER,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'toggle_browser_play_pause',return_value=False),\
+             patch.object(hid,'youtube_video_tab_focused',return_value=False),\
+             patch.object(hid,'browser_window_focused',return_value=False),\
+             patch.object(hid,'wps_presentation_is_focused',
+                          side_effect=[False]) as is_wps:
+            await hid.forward_device(remote)
+        self.assertEqual(is_wps.call_count,1)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_browser_chatgpt_ok_sends_one_enter_even_with_repeat(self):
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),
+              (ecodes.KEY_ENTER,2),(ecodes.KEY_ENTER,0)]
+        ui=await self.run_device(keys,youtube=False,mpris=False)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_browser_ok_duplicate_down_and_next_press(self):
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,1),
+              (ecodes.KEY_ENTER,2),(ecodes.KEY_ENTER,0),
+              (ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)]
+        ui=await self.run_device(keys,youtube=False,mpris=False)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
+        ])
+        self.assertEqual(ui.syn_count,4)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_dingtalk_open_keeps_release_in_original_window(self):
+        # A launcher Enter may open DingTalk immediately. A later physical
+        # key-up must not reach the newly opened application.
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),
+              (ecodes.KEY_ENTER,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'toggle_browser_play_pause',return_value=False),\
+             patch.object(hid,'youtube_video_tab_focused',return_value=False),\
+             patch.object(hid,'wps_presentation_is_focused',return_value=False):
+            await hid.forward_device(remote)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
+        ])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.fwd,[])
+
+    async def test_wps_ok_does_not_repeat_f5(self):
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),
+              (ecodes.KEY_ENTER,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'toggle_browser_play_pause',return_value=False),\
+             patch.object(hid,'youtube_video_tab_focused',return_value=False),\
+             patch.object(hid,'browser_window_focused',return_value=False),\
+             patch.object(hid,'wps_presentation_is_focused',return_value=True):
+            await hid.forward_device(remote)
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_F5,1),
+            (ecodes.EV_KEY,ecodes.KEY_F5,0),
+        ])
+        self.assertEqual(ui.fwd,[])
+
+    async def test_wps_back_then_dingtalk_ok_does_not_reactivate_wps(self):
+        # WPS remains open in the background after Esc; an OK in DingTalk
+        # must neither send F5 nor click an XWayland WPS helper.
+        keys=[(ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0),
+              (ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)]
+        remote=FakeRemote(keys);ui=FakeUInput()
+        with patch.object(hid.UInput,'from_device',return_value=ui),\
+             patch.object(hid,'toggle_browser_play_pause',return_value=False),\
+             patch.object(hid,'youtube_video_tab_focused',return_value=False),\
+             patch.object(hid,'browser_window_focused',return_value=False),\
+             patch.object(hid,'wps_presentation_is_focused',
+                          side_effect=[True,False]):
+            await hid.forward_device(remote)
+        # The unsafe synthetic X11 click workaround must no longer exist.
+        self.assertFalse(hasattr(hid,'activate_x11_window'))
+        self.assertFalse(hasattr(hid,'ensure_wps_editor_focus'))
+        self.assertEqual(ui.writes,[
+            (ecodes.EV_KEY,ecodes.KEY_ESC,1),
+            (ecodes.EV_KEY,ecodes.KEY_ESC,0),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,1),
+            (ecodes.EV_KEY,ecodes.KEY_ENTER,0),
+        ])
+        self.assertEqual(ui.fwd,[])
 
     async def test_wps_ok_still_maps_to_f5(self):
         keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)]

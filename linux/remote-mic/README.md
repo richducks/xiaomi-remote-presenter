@@ -2,6 +2,49 @@
 
 [English guide](#english-guide) · [项目首页](../../README.md)
 
+## 2026-10-09：视频安全模式（推荐）
+
+为避免遥控器 OK 被全局映射成 Enter 后影响 ChatGPT 消息发送、WPS 和钉钉，本项目新增**独立的视频专用 HID 服务** `video_only_hid.py`。它只接管 VID `2717` / PID `32B8` 的小米遥控器，**从不打开实体电脑键盘设备**。视频以外的 Enter、Home、TV、菜单、返回、音量等均原样传递；**不会**向普通应用发送 Ctrl+W、F5 或合成 Enter。旧版完整映射逻辑保留，但不建议在存在输入冲突时启用。
+
+| 视频安全模式按键 | 前提和行为 |
+| --- | --- |
+| OK | 前台浏览器视频优先通过 MPRIS 播放／暂停；YouTube 视频标签页可退回单次 K。非视频环境原样透传 Enter。 |
+| 圆盘上 | 前台普通视频通过 Global Speed D 加速一个步进；Firefox 原生画中画通过现有本地助手触发。 |
+| 圆盘下 | 同理通过 Global Speed A 减速一个步进。 |
+| 其他键 | 完全保留设备原始 HID 行为，不做浏览器标签页或 WPS 的特定映射。 |
+
+首次安装（先按下方“1. 安装”和“2. 配置 Global Speed”准备依赖和扩展）：
+
+```bash
+cd xiaomi-remote-presenter/linux/remote-mic
+bash install.sh
+systemctl --user disable --now xiaomi-remote-hid-filter.service 2>/dev/null || true
+systemctl --user disable --now xiaomi-remote-wps-linux.service 2>/dev/null || true
+bash install-services.sh --enable-video
+systemctl --user status xiaomi-remote-video-only.service
+```
+
+`install-services.sh` 使用当前仓库目录生成用户级 systemd 服务，**不包含开发者本机绝对路径**；`--enable-video` 同时启用原有 `xiaomi-chatgpt-web-bridge.service`（供 Firefox 原生画中画助手调用）。如检测到竞争的旧 HID 服务正在运行，安装程序会拒绝切换，避免两个服务同时抓取遥控器。
+
+诊断：
+
+```bash
+journalctl --user -fu xiaomi-remote-video-only.service -o cat
+curl http://127.0.0.1:18766/video/debug
+```
+
+回滚视频模式（**不会修改系统键盘，也不会自动恢复旧全功能映射**）：
+
+```bash
+systemctl --user disable --now xiaomi-remote-video-only.service
+```
+
+2026-10-09：Ubuntu 26 / GNOME Wayland 实机已确认新服务抓取小米遥控器并正常运行，83 项 Python 测试通过（其中 11 项验证视频专用隔离）。**本模式在 YouTube、抖音、夸克和 Firefox 画中画中的最新实机播放效果尚待逐站验收**；此前 2026-10-08 的视频验证针对旧完整版，并非新模式的最终验收。
+
+### 旧完整版与视频模式不能同时运行
+
+下列完整按键列表与第 3 节中的 `--enable` 命令属于**旧完整版**（WPS／浏览器标签页／视频）。为保持 ChatGPT、钉钉和实体键盘正常，建议只启用上面的 `--enable-video`。如明确需要恢复完整按键，必须先停用视频专用服务并独立验收输入行为。
+
 小米蓝牙语音遥控器 2 Pro（VID 0x2717，PID 0x32B8）功能：
 
 - **WPS 幻灯片**：OK → F5，返回 → Esc。
@@ -62,14 +105,17 @@ install.sh 不调用 sudo、不删除现有环境。如果 /dev/input/eventX 或
 
 Global Speed 是**唯一的倍速修改引擎**。用户脚本只合成快捷键并读取播放速率，不直接修改 playbackRate。旧版的 Firefox 原生 PiP < >、切窗映射和直接改速均未发布。
 
-## 3. 启用后台服务
+## 3. 启用旧完整版后台服务（仅需要 WPS/浏览器额外快捷键时）
 
+**推荐使用上方的 `bash install-services.sh --enable-video`。** 下列指令会切换为旧完整版，在恢复其他快捷键前应明确测试普通应用 Enter：
+
+    systemctl --user disable --now xiaomi-remote-video-only.service
     bash install-services.sh
     bash install-services.sh --enable
     systemctl --user status xiaomi-remote-hid-filter.service
     systemctl --user status xiaomi-chatgpt-web-bridge.service
 
-首次运行不自动启用服务；只有明确指定 --enable 才启动 HID 与网页事件桥。它们仅监听本机 127.0.0.1:18766，不对局域网开放。
+首次运行不自动启用服务。只有指定 `--enable-video` 或 `--enable` 才启动对应 HID 方案；两种方案互斥。网页事件桥仅监听本机 127.0.0.1:18766，不对局域网开放。
 
 在 **本机 Firefox**访问：
 
@@ -80,7 +126,8 @@ Global Speed 是**唯一的倍速修改引擎**。用户脚本只合成快捷键
 诊断：
 
     curl http://127.0.0.1:18766/video/debug
-    journalctl --user -fu xiaomi-remote-hid-filter.service -o cat
+    journalctl --user -fu xiaomi-remote-video-only.service -o cat
+    # 如明确改用旧完整版，请查询 xiaomi-remote-hid-filter.service
 
 实机验收：client_versions.firefox 包含 5，pip_ready 为 true，画中画按键后 last_results 中 engine=global-speed、pip=true、ok=true，且 before 与 speed 确实不同。**仅收到指令不代表视频倍速已经生效**。
 
@@ -107,6 +154,7 @@ Global Speed 是**唯一的倍速修改引擎**。用户脚本只合成快捷键
 
 停止：
 
+    systemctl --user disable --now xiaomi-remote-video-only.service
     systemctl --user disable --now xiaomi-remote-hid-filter.service
     systemctl --user disable --now xiaomi-chatgpt-web-bridge.service
     systemctl --user disable --now xiaomi-remote-mic.service
@@ -135,4 +183,4 @@ Global Speed 是**唯一的倍速修改引擎**。用户脚本只合成快捷键
 
 ## English guide
 
-This optional Linux-enhanced profile supports Xiaomi Bluetooth Remote 2 Pro (0x2717:0x32B8), WPS, BLE virtual microphone and Firefox native PiP video speed **through Global Speed only**. Install dependencies, run "bash install.sh" then "bash install-services.sh --enable", configure the Global Speed page shortcuts **D (+0.1x)** and **A (-0.1x)**, and approve the v0.5 helper from **http://127.0.0.1:18766/video/setup** in Firefox Tampermonkey. Do not run the legacy xiaomi-remote-wps-linux service simultaneously. This video feature is Linux-specific; the Windows/macOS files continue to support presentation mode. Licensing: GPL-3.0-only for this subfolder, MIT for existing presenter files.
+This optional Linux-enhanced profile supports Xiaomi Bluetooth Remote 2 Pro (0x2717:0x32B8), WPS, BLE virtual microphone and Firefox native PiP video speed **through Global Speed only**. For the recommended **video-only mode that preserves Enter and all non-video keys**, install dependencies, run `bash install.sh` then `bash install-services.sh --enable-video`. Configure Global Speed shortcuts **D (+0.1x)** and **A (-0.1x)** and, for Firefox native PiP, approve helper v0.5 from **http://127.0.0.1:18766/video/setup**. The optional legacy full remapper is `--enable`; never run both profiles or the older WPS-only HID service together. Video-only mode has automated test coverage but site-level hardware validation is still pending. This Linux-native feature is separate from Windows/macOS support. Licensing: GPL-3.0-only for this subfolder, MIT for existing presenter files.

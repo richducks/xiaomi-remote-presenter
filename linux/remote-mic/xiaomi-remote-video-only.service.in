@@ -1,0 +1,15 @@
+[Unit]
+Description=Xiaomi Remote 2 Pro video-only controls (other keys unchanged)
+After=graphical-session.target bluetooth.target
+Conflicts=xiaomi-remote-hid-filter.service xiaomi-remote-wps-linux.service
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT_DIR@
+ExecStart=@ROOT_DIR@/.venv/bin/python @ROOT_DIR@/video_only_hid.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5
+
+[Install]
+WantedBy=default.target

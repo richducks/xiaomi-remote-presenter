@@ -6,6 +6,8 @@ Turn a **Xiaomi Remote 2 Pro / Xiaomi Bluetooth Voice Remote** into a device-spe
 
 The key design rule is: **never globally remap Enter/Back**. The remote reports OK as an Enter-like key, so each operating system uses a device-aware input layer.
 
+**Linux video-only safety profile (recommended, 2026-10-09):** the [standalone video HID service](linux/remote-mic/README.md#2026-10-09视频安全模式推荐) controls only foreground video playback/speed and preserves all non-video keys, including Enter, unchanged. Install with `bash install-services.sh --enable-video`. The legacy full presenter mapping is opt-in and must never run concurrently with this profile.
+
 ## Platform matrix
 
 | Platform | Backend | Device-specific | Browser tabs & navigation | Video OK | Global Speed | Validation |

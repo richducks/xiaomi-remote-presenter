@@ -5,7 +5,6 @@ import asyncio
 import json
 import urllib.request
 import urllib.error
-import ctypes
 import logging
 import re
 import subprocess
@@ -80,147 +79,6 @@ def route_firefox_pip_to_global_speed(key_code: int) -> bool:
         return False
 
 
-WPS_RESUME_WINDOW_SECONDS = 15.0
-
-
-def find_wps_top_window() -> str | None:
-    tree = _run('xwininfo', '-root', '-tree')
-    for line in tree.splitlines():
-        low = line.lower()
-        if 'wps office' in low and 'wpsoffice' in low:
-            match = re.search(r'0x[0-9a-fA-F]+', line)
-            if match:
-                return match.group(0)
-    return None
-
-
-def activate_x11_window(wid: str) -> bool:
-    try:
-        x11 = ctypes.CDLL('libX11.so.6')
-        xtst = ctypes.CDLL('libXtst.so.6')
-
-        class XWindowAttributes(ctypes.Structure):
-            _fields_ = [
-                ('x', ctypes.c_int), ('y', ctypes.c_int),
-                ('width', ctypes.c_int), ('height', ctypes.c_int),
-                ('border_width', ctypes.c_int), ('depth', ctypes.c_int),
-                ('visual', ctypes.c_void_p), ('root', ctypes.c_ulong),
-                ('class_', ctypes.c_int), ('bit_gravity', ctypes.c_int),
-                ('win_gravity', ctypes.c_int), ('backing_store', ctypes.c_int),
-                ('backing_planes', ctypes.c_ulong), ('backing_pixel', ctypes.c_ulong),
-                ('save_under', ctypes.c_int), ('colormap', ctypes.c_ulong),
-                ('map_installed', ctypes.c_int), ('map_state', ctypes.c_int),
-                ('all_event_masks', ctypes.c_long),
-                ('your_event_mask', ctypes.c_long),
-                ('do_not_propagate_mask', ctypes.c_long),
-                ('override_redirect', ctypes.c_int),
-                ('screen', ctypes.c_void_p),
-            ]
-
-        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-        x11.XOpenDisplay.restype = ctypes.c_void_p
-        x11.XGetWindowAttributes.argtypes = [
-            ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XWindowAttributes)
-        ]
-        x11.XGetWindowAttributes.restype = ctypes.c_int
-        x11.XTranslateCoordinates.argtypes = [
-            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
-            ctypes.c_int, ctypes.c_int,
-            ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_ulong),
-        ]
-        x11.XTranslateCoordinates.restype = ctypes.c_int
-        x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
-        x11.XDefaultRootWindow.restype = ctypes.c_ulong
-        x11.XQueryPointer.argtypes = [
-            ctypes.c_void_p, ctypes.c_ulong,
-            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
-            ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_uint),
-        ]
-        x11.XQueryPointer.restype = ctypes.c_int
-        x11.XFlush.argtypes = [ctypes.c_void_p]
-        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-
-        xtst.XTestFakeMotionEvent.argtypes = [
-            ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong
-        ]
-        xtst.XTestFakeMotionEvent.restype = ctypes.c_int
-        xtst.XTestFakeButtonEvent.argtypes = [
-            ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong
-        ]
-        xtst.XTestFakeButtonEvent.restype = ctypes.c_int
-
-        dpy = x11.XOpenDisplay(None)
-        if not dpy:
-            return False
-
-        try:
-            win = int(wid, 16)
-            root = x11.XDefaultRootWindow(dpy)
-
-            attrs = XWindowAttributes()
-            if not x11.XGetWindowAttributes(dpy, win, ctypes.byref(attrs)):
-                return False
-
-            abs_x = ctypes.c_int()
-            abs_y = ctypes.c_int()
-            child = ctypes.c_ulong()
-            if not x11.XTranslateCoordinates(
-                dpy, win, root, 0, 0,
-                ctypes.byref(abs_x), ctypes.byref(abs_y), ctypes.byref(child)
-            ):
-                return False
-
-            # Save current pointer position.
-            root_ret = ctypes.c_ulong()
-            child_ret = ctypes.c_ulong()
-            old_x = ctypes.c_int()
-            old_y = ctypes.c_int()
-            win_x = ctypes.c_int()
-            win_y = ctypes.c_int()
-            mask = ctypes.c_uint()
-            x11.XQueryPointer(
-                dpy, root,
-                ctypes.byref(root_ret), ctypes.byref(child_ret),
-                ctypes.byref(old_x), ctypes.byref(old_y),
-                ctypes.byref(win_x), ctypes.byref(win_y),
-                ctypes.byref(mask),
-            )
-
-            # Click the title-bar area. This gives Mutter a real user-like
-            # activation event, unlike _NET_ACTIVE_WINDOW under Wayland.
-            click_x = abs_x.value + min(max(attrs.width // 3, 180), max(attrs.width - 40, 40))
-            click_y = abs_y.value + 18
-
-            xtst.XTestFakeMotionEvent(dpy, -1, click_x, click_y, 0)
-            xtst.XTestFakeButtonEvent(dpy, 1, 1, 0)
-            xtst.XTestFakeButtonEvent(dpy, 1, 0, 0)
-            x11.XFlush(dpy)
-            time.sleep(0.08)
-
-            # Restore the pointer so the workaround is almost invisible.
-            xtst.XTestFakeMotionEvent(dpy, -1, old_x.value, old_y.value, 0)
-            x11.XFlush(dpy)
-            return True
-        finally:
-            x11.XCloseDisplay(dpy)
-    except Exception:
-        LOG.exception('failed to click-focus WPS window %s', wid)
-        return False
-
-
-def ensure_wps_editor_focus() -> bool:
-    wid = find_wps_top_window()
-    if not wid:
-        return False
-    ok = activate_x11_window(wid)
-    if ok:
-        time.sleep(0.12)
-    return ok
-
-
 def _run(*args: str) -> str:
     try:
         p = subprocess.run(
@@ -292,14 +150,13 @@ async def forward_device(dev: InputDevice) -> None:
     )
     blocked = 0
     mapped_down: dict[int, int] = {}
-    swallowed_ok: set[int] = set()
+    ok_held: set[int] = set()  # Xiaomi OK down/up state; not the PC keyboard.
     swallowed_close_tab: set[int] = set()
     swallowed_menu: set[int] = set()
     swallowed_browser_new_tab: set[int] = set()
     swallowed_browser_back: set[int] = set()
     # HOME and WWW may be reported together by one physical press.
     last_home_new_tab_at = -float('inf')
-    wps_resume_until = 0.0
 
     try:
         dev.grab()
@@ -319,6 +176,18 @@ async def forward_device(dev: InputDevice) -> None:
                         ev.value, blocked,
                     )
                     continue
+
+                # Every remote OK is one balanced pulse, never a held Enter
+                # delivered across application and focus transitions.
+                if ev.code in OK_KEYS:
+                    if ev.value == 0:
+                        ok_held.discard(ev.code)
+                        continue
+                    if ev.value != 1 or ev.code in ok_held:
+                        LOG.info("suppressed held/repeated OK: %s value=%s",
+                                 ecodes.KEY[ev.code], ev.value)
+                        continue
+                    ok_held.add(ev.code)
 
                 if ev.code in MENU_KEYS:
                     # Browser next-tab shortcut, independent of video/MPRIS.
@@ -457,77 +326,41 @@ async def forward_device(dev: InputDevice) -> None:
                             continue
 
                 if ev.code in OK_KEYS:
-                    # Prefer the foreground video's MPRIS PlayPause. YouTube
-                    # sometimes translates its window title but not MPRIS
-                    # metadata; if that match fails, press YouTube's native
-                    # K playback toggle ONLY for its foreground video page.
-                    # Suppress repeat/up after success, preventing a double
-                    # toggle even if page focus changes after playback.
-                    if ev.code in swallowed_ok:
-                        if ev.value == 0:
-                            swallowed_ok.remove(ev.code)
+                    # F5 only in the real, focused WPS editor. Never forcibly
+                    # click a WPS/XWayland helper window from another app.
+                    if wps_presentation_is_focused():
+                        target = ecodes.KEY_F5
+                        LOG.info("WPS OK -> single F5 tap")
+                    elif await asyncio.to_thread(toggle_browser_play_pause):
+                        LOG.info("browser video OK -> PlayPause via MPRIS")
                         continue
-                    if ev.value == 1:
-                        if await asyncio.to_thread(toggle_browser_play_pause):
-                            swallowed_ok.add(ev.code)
-                            LOG.info("browser video OK -> PlayPause via MPRIS")
-                            continue
-                        if await asyncio.to_thread(youtube_video_tab_focused):
-                            swallowed_ok.add(ev.code)
-                            ui.write(ecodes.EV_KEY, ecodes.KEY_K, 1)
-                            ui.syn()
-                            ui.write(ecodes.EV_KEY, ecodes.KEY_K, 0)
-                            ui.syn()
-                            LOG.info("YouTube video OK -> KEY_K PlayPause fallback")
-                            continue
+                    elif await asyncio.to_thread(youtube_video_tab_focused):
+                        target = ecodes.KEY_K
+                        LOG.info("YouTube video OK -> single K tap")
+                    else:
+                        target = ecodes.KEY_ENTER
+                        LOG.info("regular application OK -> single Enter tap")
+                    # Immediately complete the tap in the original window.
+                    # The later physical key-up is swallowed above.
+                    ui.write(ecodes.EV_KEY, target, 1)
+                    ui.syn()
+                    ui.write(ecodes.EV_KEY, target, 0)
+                    ui.syn()
+                    continue
 
-                if ev.code in OK_KEYS or ev.code in BACK_KEYS:
-                    target = ecodes.KEY_F5 if ev.code in OK_KEYS else ecodes.KEY_ESC
-
-                    focused = wps_presentation_is_focused()
-                    resume_context = (
-                        ev.code in OK_KEYS
-                        and time.monotonic() < wps_resume_until
-                    )
-
-                    # After leaving slideshow, WPS/XWayland can temporarily focus a
-                    # 1x1 helper window. In that specific resume context, reactivate
-                    # the real WPS top-level window before sending F5.
-                    if ev.value == 1 and (focused or resume_context):
-                        if ev.code in OK_KEYS:
-                            if resume_context or focused:
-                                ensure_wps_editor_focus()
-                            wps_resume_until = 0.0
-                        else:
-                            wps_resume_until = time.monotonic() + WPS_RESUME_WINDOW_SECONDS
-
+                if ev.code in BACK_KEYS:
+                    target = ecodes.KEY_ESC
+                    if ev.value == 1 and wps_presentation_is_focused():
                         mapped_down[ev.code] = target
                         ui.write(ecodes.EV_KEY, target, 1)
-                        LOG.info(
-                            'mapped %s down -> %s (WPS focused=%s resume=%s)',
-                            ecodes.KEY[ev.code],
-                            ecodes.KEY[target],
-                            focused,
-                            resume_context,
-                        )
+                        LOG.info("WPS BACK -> Esc down")
                         continue
-
-                    # Repeat/release must follow the decision made on key down,
-                    # even if focus changes while the key is held.
                     if ev.code in mapped_down:
-                        mapped_target = mapped_down[ev.code]
-                        if ev.value == 2:
-                            ui.write(ecodes.EV_KEY, mapped_target, 2)
-                            continue
                         if ev.value == 0:
-                            ui.write(ecodes.EV_KEY, mapped_target, 0)
+                            ui.write(ecodes.EV_KEY, target, 0)
                             del mapped_down[ev.code]
-                            LOG.info(
-                                'mapped %s up -> %s',
-                                ecodes.KEY[ev.code],
-                                ecodes.KEY[mapped_target],
-                            )
-                            continue
+                        # Do not auto-repeat Esc in WPS.
+                        continue
 
             # Everything else remains unchanged.
             ui.write_event(ev)
