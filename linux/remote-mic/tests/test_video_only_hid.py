@@ -61,7 +61,8 @@ class FakeUInput:
 
 class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
     async def run_remote(self, events, *, video_tab=False, pip=False,
-                         helper=False, mpris=False, youtube=False):
+                         helper=False, mpris=False, youtube=False,
+                         browser_focused=False):
         dev = FakeRemote(events)
         ui = FakeUInput()
         with patch.object(video.UInput, "from_device", return_value=ui), \
@@ -69,7 +70,8 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
              patch.object(video, "firefox_pip_focused", return_value=pip), \
              patch.object(video, "pip_global_speed", return_value=helper), \
              patch.object(video, "toggle_browser_play_pause", return_value=mpris), \
-             patch.object(video, "youtube_video_tab_focused", return_value=youtube):
+             patch.object(video, "youtube_video_tab_focused", return_value=youtube), \
+             patch.object(video, "browser_window_focused", return_value=browser_focused):
             await video.forward_device(dev)
         self.assertFalse(dev.grabbed)
         self.assertTrue(dev.closed)
@@ -95,6 +97,99 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
         ui = await self.run_remote(keys)
         self.assertEqual(ui.forwarded, keys)
         self.assertEqual(ui.written, [])
+
+    async def test_browser_home_opens_one_tab_even_if_held(self):
+        keys = [(ecodes.KEY_HOME,1),(ecodes.KEY_HOME,2),
+                (ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0)]
+        ui = await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0)])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.forwarded,[])
+
+    async def test_browser_home_and_www_duplicate_only_one_tab(self):
+        keys=[(ecodes.KEY_HOME,1),(ecodes.KEY_WWW,1),
+              (ecodes.KEY_HOME,0),(ecodes.KEY_WWW,0)]
+        ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0)])
+        self.assertEqual(ui.forwarded,[])
+
+    async def test_browser_menu_next_tab_no_repeat(self):
+        keys=[(ecodes.KEY_COMPOSE,1),(ecodes.KEY_COMPOSE,2),
+              (ecodes.KEY_COMPOSE,0)]
+        ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,1),
+            (ecodes.EV_KEY,ecodes.KEY_TAB,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0)])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.forwarded,[])
+
+    async def test_browser_tv_closes_single_tab(self):
+        keys=[(ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,2),
+              (ecodes.KEY_GRAVE,0)]
+        ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0)])
+        self.assertEqual(ui.syn_count,2)
+        self.assertEqual(ui.forwarded,[])
+
+    async def test_browser_enter_still_passes_down_repeat_up(self):
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),
+              (ecodes.KEY_ENTER,0),(ecodes.KEY_KPENTER,1),
+              (ecodes.KEY_KPENTER,0)]
+        ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.forwarded,keys)
+        self.assertEqual(ui.written,[])
+
+    async def test_browser_shortcuts_do_not_remap_back_or_volume(self):
+        keys=[(ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0),
+              (ecodes.KEY_VOLUMEUP,1),(ecodes.KEY_VOLUMEUP,0)]
+        ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.forwarded,keys)
+        self.assertEqual(ui.written,[])
+
+    async def test_browser_tab_release_swallowed_after_focus_loss(self):
+        keys=[(ecodes.KEY_GRAVE,1),(ecodes.KEY_GRAVE,2),
+              (ecodes.KEY_GRAVE,0)]
+        dev=FakeRemote(keys); ui=FakeUInput()
+        with patch.object(video.UInput,"from_device",return_value=ui), \
+             patch.object(video,"browser_window_focused",
+                          side_effect=[True,False]) as focus:
+            await video.forward_device(dev)
+        self.assertEqual(focus.call_count,1)
+        self.assertEqual(ui.forwarded,[])
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,1),
+            (ecodes.EV_KEY,ecodes.KEY_W,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0)])
+
+    async def test_home_separate_press_creates_separate_tabs(self):
+        keys=[(ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0),
+              (ecodes.KEY_HOME,1),(ecodes.KEY_HOME,0)]
+        moments=iter([2.0,3.0])
+        with patch.object(video,"time",SimpleNamespace(monotonic=lambda: next(moments))):
+            ui=await self.run_remote(keys,browser_focused=True)
+        shortcut=[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,1),
+            (ecodes.EV_KEY,ecodes.KEY_T,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTCTRL,0)]
+        self.assertEqual(ui.written,shortcut+shortcut)
+        self.assertEqual(ui.syn_count,4)
+        self.assertEqual(ui.forwarded,[])
 
     async def test_video_speed_maps_only_arrows_one_step_each(self):
         keys = [(ecodes.KEY_UP,1),(ecodes.KEY_UP,2),(ecodes.KEY_UP,0),

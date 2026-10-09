@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
-"""Video-only Xiaomi RC003 input adapter.
+"""Safe Xiaomi RC003 browser-video and tab remote.
 
 The old all-purpose HID filter is deliberately NOT used. This service handles
-video controls only when a foreground browser has a qualifying video; all
-other remote keys (notably Enter) pass through with their original down/repeat
-/up sequence. The PC keyboard is never opened or grabbed.
+video playback and three browser-only tab shortcuts; all other remote keys
+(notably Enter) pass through with their original down/repeat/up sequence.
+The PC keyboard is never opened or grabbed.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
 
 from evdev import InputDevice, UInput, ecodes, list_devices
 
 from video_browser_context import (
+    browser_window_focused,
     browser_media_tab_focused,
     firefox_pip_focused,
     toggle_browser_play_pause,
@@ -29,6 +31,14 @@ PID = 0x32B8
 VIRTUAL_NAME = "Xiaomi Remote Video Only"
 SPEED_KEYS = {ecodes.KEY_UP: ecodes.KEY_D, ecodes.KEY_DOWN: ecodes.KEY_A}
 OK_KEYS = {ecodes.KEY_ENTER, ecodes.KEY_OK}
+# Xiaomi RC003 house: HOME/WWW (occasionally reported together); TV: GRAVE;
+# three-line menu: COMPOSE. These are remapped ONLY if a browser has focus.
+HOME_KEYS = {ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW}
+BROWSER_TAB_KEYS = {
+    **{key: ecodes.KEY_T for key in HOME_KEYS},
+    ecodes.KEY_COMPOSE: ecodes.KEY_TAB,
+    ecodes.KEY_GRAVE: ecodes.KEY_W,
+}
 PIP_ENDPOINT = "http://127.0.0.1:18766/video/emit"
 
 
@@ -80,6 +90,15 @@ def tap(ui: UInput, key: int) -> None:
     ui.write(ecodes.EV_KEY, key, 0)
     ui.syn()
 
+def ctrl_tap(ui: UInput, key: int) -> None:
+    """Single complete Ctrl+key, with no modifier held across window changes."""
+    ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
+    ui.write(ecodes.EV_KEY, key, 1)
+    ui.syn()
+    ui.write(ecodes.EV_KEY, key, 0)
+    ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
+    ui.syn()
+
 
 async def forward_device(device: InputDevice) -> None:
     ui = UInput.from_device(
@@ -93,9 +112,11 @@ async def forward_device(device: InputDevice) -> None:
     )
     video_held: set[int] = set()
     ok_held: set[int] = set()
+    browser_tab_held: set[int] = set()
+    last_home_tab_at = -float("inf")
     try:
         device.grab()
-        LOG.info("video-only filter grabbed %s %s; non-video keys are untouched",
+        LOG.info("safe video/browser filter grabbed %s %s; Enter untouched",
                  device.path, device.name)
         async for event in device.async_read_loop():
             if event.type != ecodes.EV_KEY:
@@ -103,6 +124,30 @@ async def forward_device(device: InputDevice) -> None:
                 continue
 
             code, value = event.code, event.value
+
+            # Decide on physical down; swallow its matching repeat and
+            # release even if the Ctrl shortcut changes focus. This prevents
+            # stray tab switches/closes in unrelated applications.
+            if code in browser_tab_held:
+                if value == 0:
+                    browser_tab_held.discard(code)
+                continue
+            if (code in BROWSER_TAB_KEYS and value == 1
+                    and await asyncio.to_thread(browser_window_focused)):
+                browser_tab_held.add(code)
+                if code in HOME_KEYS:
+                    # Some firmware sends HOME and WWW for the same press.
+                    now = time.monotonic()
+                    if now - last_home_tab_at < 0.18:
+                        LOG.info("duplicate browser Home suppressed: %s",
+                                 ecodes.KEY[code])
+                        continue
+                    last_home_tab_at = now
+                target = BROWSER_TAB_KEYS[code]
+                ctrl_tap(ui, target)
+                LOG.info("browser tab: %s -> Ctrl+%s",
+                         ecodes.KEY[code], ecodes.KEY[target])
+                continue
 
             if code in video_held:
                 if value == 0:
