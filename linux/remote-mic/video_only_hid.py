@@ -39,6 +39,15 @@ BROWSER_TAB_KEYS = {
     ecodes.KEY_COMPOSE: ecodes.KEY_TAB,
     ecodes.KEY_GRAVE: ecodes.KEY_W,
 }
+# Some RC003 firmwares emit complete down/up pairs repeatedly during one
+# physical press. A held-key set cannot catch those short pairs. Rate-limit
+# browser-only shortcuts so a noisy button cannot switch/close many tabs.
+# The close shortcut has the longest guard because it can discard work.
+BROWSER_SHORTCUT_COOLDOWNS = {
+    ecodes.KEY_T: 0.50,
+    ecodes.KEY_TAB: 0.45,
+    ecodes.KEY_W: 0.80,
+}
 PIP_ENDPOINT = "http://127.0.0.1:18766/video/emit"
 
 
@@ -113,7 +122,7 @@ async def forward_device(device: InputDevice) -> None:
     video_held: set[int] = set()
     ok_held: set[int] = set()
     browser_tab_held: set[int] = set()
-    last_home_tab_at = -float("inf")
+    last_shortcut_at: dict[int, float] = {}
     try:
         device.grab()
         LOG.info("safe video/browser filter grabbed %s %s; Enter untouched",
@@ -135,15 +144,13 @@ async def forward_device(device: InputDevice) -> None:
             if (code in BROWSER_TAB_KEYS and value == 1
                     and await asyncio.to_thread(browser_window_focused)):
                 browser_tab_held.add(code)
-                if code in HOME_KEYS:
-                    # Some firmware sends HOME and WWW for the same press.
-                    now = time.monotonic()
-                    if now - last_home_tab_at < 0.18:
-                        LOG.info("duplicate browser Home suppressed: %s",
-                                 ecodes.KEY[code])
-                        continue
-                    last_home_tab_at = now
                 target = BROWSER_TAB_KEYS[code]
+                now = time.monotonic()
+                if (now - last_shortcut_at.get(target, -float("inf"))
+                        < BROWSER_SHORTCUT_COOLDOWNS[target]):
+                    LOG.debug("noisy browser key suppressed: %s", ecodes.KEY[code])
+                    continue
+                last_shortcut_at[target] = now
                 ctrl_tap(ui, target)
                 LOG.info("browser tab: %s -> Ctrl+%s",
                          ecodes.KEY[code], ecodes.KEY[target])

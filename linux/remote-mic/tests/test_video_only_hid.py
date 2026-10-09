@@ -191,6 +191,46 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui.syn_count,4)
         self.assertEqual(ui.forwarded,[])
 
+    async def test_menu_bounce_cannot_cycle_many_tabs(self):
+        keys = [(ecodes.KEY_COMPOSE, x) for x in (1, 0, 1, 0, 1, 0)]
+        moments = iter([1.0, 1.12, 1.32])
+        with patch.object(video, "time", SimpleNamespace(monotonic=lambda: next(moments))):
+            ui = await self.run_remote(keys, browser_focused=True)
+        self.assertEqual(ui.written, [
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1),
+            (ecodes.EV_KEY, ecodes.KEY_TAB, 1),
+            (ecodes.EV_KEY, ecodes.KEY_TAB, 0),
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0),
+        ])
+        self.assertEqual(ui.forwarded, [])
+
+    async def test_tv_bounce_cannot_close_multiple_tabs(self):
+        keys = [(ecodes.KEY_GRAVE, x) for x in (1, 0, 1, 0, 1, 0)]
+        moments = iter([1.0, 1.22, 1.60])
+        with patch.object(video, "time", SimpleNamespace(monotonic=lambda: next(moments))):
+            ui = await self.run_remote(keys, browser_focused=True)
+        self.assertEqual(ui.written, [
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1),
+            (ecodes.EV_KEY, ecodes.KEY_W, 1),
+            (ecodes.EV_KEY, ecodes.KEY_W, 0),
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0),
+        ])
+        self.assertEqual(ui.forwarded, [])
+
+    async def test_deliberate_second_tv_press_after_cooldown(self):
+        keys = [(ecodes.KEY_GRAVE, x) for x in (1, 0, 1, 0)]
+        moments = iter([1.0, 2.0])
+        with patch.object(video, "time", SimpleNamespace(monotonic=lambda: next(moments))):
+            ui = await self.run_remote(keys, browser_focused=True)
+        shortcut = [
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1),
+            (ecodes.EV_KEY, ecodes.KEY_W, 1),
+            (ecodes.EV_KEY, ecodes.KEY_W, 0),
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0),
+        ]
+        self.assertEqual(ui.written, shortcut + shortcut)
+        self.assertEqual(ui.forwarded, [])
+
     async def test_video_speed_maps_only_arrows_one_step_each(self):
         keys = [(ecodes.KEY_UP,1),(ecodes.KEY_UP,2),(ecodes.KEY_UP,0),
                 (ecodes.KEY_DOWN,1),(ecodes.KEY_DOWN,0),
