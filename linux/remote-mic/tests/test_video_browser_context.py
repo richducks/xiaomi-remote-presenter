@@ -29,6 +29,48 @@ class VideoBrowserContextTests(unittest.TestCase):
         self.assertFalse(ctx.is_firefox_pip_window('firefox','夸克网盘 — Mozilla Firefox'))
         self.assertFalse(ctx.is_firefox_pip_window('chromium','画中画'))
 
+    def test_wps_app_selection_never_matches_writer_or_spreadsheets(self):
+        self.assertTrue(ctx.is_wps_presentation_application('wpp','Untitled'))
+        self.assertTrue(ctx.is_wps_presentation_application('WPS Office','deck.pptx - WPS Office'))
+        self.assertTrue(ctx.is_wps_presentation_application('wps 演示','Slide Show'))
+        for app,title in (('wps office','budget.xlsx - WPS Office'),
+                          ('wps office','report.docx - WPS Office'),
+                          ('firefox','deck.pptx - Browser'),
+                          ('wps office','WPS Office')):
+            with self.subTest(app=app,title=title):
+                self.assertFalse(ctx.is_wps_presentation_application(app,title))
+
+    def test_ambiguous_active_browser_and_wps_fail_closed(self):
+        import sys
+        from unittest.mock import patch
+        atspi=MagicMock()
+        atspi.StateType.ACTIVE=99
+        apps=[]
+        for name,title in [('Firefox','Video - Firefox'),
+                           ('WPS Office','slides.pptx - WPS Office')]:
+            frame=MagicMock()
+            frame.get_role_name.return_value='frame'
+            frame.get_state_set.return_value.contains.return_value=True
+            frame.get_name.return_value=title
+            app=MagicMock()
+            app.get_name.return_value=name
+            app.get_child_count.return_value=1
+            app.get_child_at_index.return_value=frame
+            apps.append(app)
+        desktop=MagicMock()
+        desktop.get_child_count.return_value=2
+        desktop.get_child_at_index.side_effect=lambda i:apps[i]
+        atspi.get_desktop.return_value=desktop
+        gi=MagicMock()
+        gi.repository.Atspi=atspi
+        with patch.dict(sys.modules,{'gi':gi,'gi.repository':gi.repository}):
+            self.assertFalse(ctx.browser_window_focused())
+            self.assertFalse(ctx.wps_presentation_focused())
+            apps.pop(0)
+            desktop.get_child_count.return_value=1
+            self.assertTrue(ctx.wps_presentation_focused())
+            self.assertFalse(ctx.browser_window_focused())
+
     def test_home_close_supported_standalone_browsers(self):
         for app in (
             "Firefox", "Mozilla Firefox", "Firefox Nightly",

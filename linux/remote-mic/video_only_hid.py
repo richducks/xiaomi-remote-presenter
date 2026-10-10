@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Safe Xiaomi RC003 browser-video and tab remote.
 
-The old all-purpose HID filter is deliberately NOT used. This service handles
-video playback and three browser-only tab shortcuts; all other remote keys
-(notably Enter) pass through with their original down/repeat/up sequence.
+The old all-purpose HID filter is deliberately NOT used. This one service
+handles video playback, browser shortcuts, and WPS Presentation keys. Normal
+Enter still passes through with its original down/repeat/up sequence.
 The PC keyboard is never opened or grabbed.
 """
 from __future__ import annotations
@@ -19,6 +19,7 @@ from evdev import InputDevice, UInput, ecodes, list_devices
 
 from video_browser_context import (
     browser_window_focused,
+    wps_presentation_focused,
     browser_media_tab_focused,
     firefox_pip_focused,
     toggle_browser_play_pause,
@@ -29,8 +30,12 @@ LOG = logging.getLogger("xiaomi-remote-video-only")
 VID = 0x2717
 PID = 0x32B8
 VIRTUAL_NAME = "Xiaomi Remote Video Only"
+# Never grab another remapper's virtual output.
+VIRTUAL_DEVICE_NAMES = {VIRTUAL_NAME, "Xiaomi Remote 2 Pro Filtered"}
 SPEED_KEYS = {ecodes.KEY_UP: ecodes.KEY_D, ecodes.KEY_DOWN: ecodes.KEY_A}
 OK_KEYS = {ecodes.KEY_ENTER, ecodes.KEY_OK}
+BACK_KEYS = {ecodes.KEY_BACK}
+BLOCK_PHYSICAL_F5 = ecodes.KEY_F5  # Prevent RC003 microphone-key browser refresh.
 # Xiaomi RC003 house: HOME/WWW (occasionally reported together); TV: GRAVE;
 # three-line menu: COMPOSE. These are remapped ONLY if a browser has focus.
 HOME_KEYS = {ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW}
@@ -47,6 +52,7 @@ BROWSER_SHORTCUT_COOLDOWNS = {
     ecodes.KEY_T: 0.50,
     ecodes.KEY_TAB: 0.45,
     ecodes.KEY_W: 0.80,
+    ecodes.KEY_LEFT: 0.45,
 }
 PIP_ENDPOINT = "http://127.0.0.1:18766/video/emit"
 
@@ -56,7 +62,7 @@ def find_remote() -> InputDevice | None:
     for path in list_devices():
         try:
             device = InputDevice(path)
-            if device.name == VIRTUAL_NAME:
+            if device.name in VIRTUAL_DEVICE_NAMES:
                 device.close()
                 continue
             if (device.info.vendor, device.info.product) == (VID, PID):
@@ -99,14 +105,18 @@ def tap(ui: UInput, key: int) -> None:
     ui.write(ecodes.EV_KEY, key, 0)
     ui.syn()
 
-def ctrl_tap(ui: UInput, key: int) -> None:
-    """Single complete Ctrl+key, with no modifier held across window changes."""
-    ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
+def modified_tap(ui: UInput, modifier: int, key: int) -> None:
+    """Balanced shortcut, releasing the modifier before focus changes."""
+    ui.write(ecodes.EV_KEY, modifier, 1)
     ui.write(ecodes.EV_KEY, key, 1)
     ui.syn()
     ui.write(ecodes.EV_KEY, key, 0)
-    ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
+    ui.write(ecodes.EV_KEY, modifier, 0)
     ui.syn()
+
+
+def ctrl_tap(ui: UInput, key: int) -> None:
+    modified_tap(ui, ecodes.KEY_LEFTCTRL, key)
 
 
 async def forward_device(device: InputDevice) -> None:
@@ -122,10 +132,11 @@ async def forward_device(device: InputDevice) -> None:
     video_held: set[int] = set()
     ok_held: set[int] = set()
     browser_tab_held: set[int] = set()
+    back_held: set[int] = set()
     last_shortcut_at: dict[int, float] = {}
     try:
         device.grab()
-        LOG.info("safe video/browser filter grabbed %s %s; Enter untouched",
+        LOG.info("unified safe filter grabbed %s %s; ordinary Enter untouched",
                  device.path, device.name)
         async for event in device.async_read_loop():
             if event.type != ecodes.EV_KEY:
@@ -133,6 +144,31 @@ async def forward_device(device: InputDevice) -> None:
                 continue
 
             code, value = event.code, event.value
+
+            # A legacy RC003 microphone key generates F5. Never forward a
+            # physical F5 that could refresh a form or lose typed text.
+            if code == BLOCK_PHYSICAL_F5:
+                continue
+
+            if code in back_held:
+                if value == 0:
+                    back_held.discard(code)
+                continue
+            if code in BACK_KEYS and value == 1:
+                if await asyncio.to_thread(wps_presentation_focused):
+                    back_held.add(code)
+                    tap(ui, ecodes.KEY_ESC)
+                    LOG.info("WPS Back -> Escape")
+                    continue
+                if await asyncio.to_thread(browser_window_focused):
+                    back_held.add(code)
+                    now = time.monotonic()
+                    target = ecodes.KEY_LEFT
+                    if now - last_shortcut_at.get(target, -float('inf')) >= BROWSER_SHORTCUT_COOLDOWNS[target]:
+                        last_shortcut_at[target] = now
+                        modified_tap(ui, ecodes.KEY_LEFTALT, target)
+                        LOG.info("browser Back -> Alt+Left")
+                    continue
 
             # Decide on physical down; swallow its matching repeat and
             # release even if the Ctrl shortcut changes focus. This prevents
@@ -180,6 +216,11 @@ async def forward_device(device: InputDevice) -> None:
                     ok_held.discard(code)
                 continue
             if code in OK_KEYS and value == 1:
+                if await asyncio.to_thread(wps_presentation_focused):
+                    ok_held.add(code)
+                    tap(ui, ecodes.KEY_F5)
+                    LOG.info("WPS OK -> F5")
+                    continue
                 if await asyncio.to_thread(toggle_browser_play_pause):
                     ok_held.add(code)
                     LOG.info("video OK -> MPRIS PlayPause")
@@ -215,6 +256,9 @@ async def main() -> None:
             await forward_device(device)
         except (PermissionError, OSError) as exc:
             LOG.warning("remote disconnected/unavailable: %s", exc)
+            await asyncio.sleep(2)
+        except Exception:
+            LOG.exception("input filter failed; reconnecting")
             await asyncio.sleep(2)
 
 

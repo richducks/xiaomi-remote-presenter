@@ -62,7 +62,7 @@ class FakeUInput:
 class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
     async def run_remote(self, events, *, video_tab=False, pip=False,
                          helper=False, mpris=False, youtube=False,
-                         browser_focused=False):
+                         browser_focused=False, wps_focused=False):
         dev = FakeRemote(events)
         ui = FakeUInput()
         with patch.object(video.UInput, "from_device", return_value=ui), \
@@ -71,7 +71,8 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
              patch.object(video, "pip_global_speed", return_value=helper), \
              patch.object(video, "toggle_browser_play_pause", return_value=mpris), \
              patch.object(video, "youtube_video_tab_focused", return_value=youtube), \
-             patch.object(video, "browser_window_focused", return_value=browser_focused):
+             patch.object(video, "browser_window_focused", return_value=browser_focused), \
+             patch.object(video, "wps_presentation_focused", return_value=wps_focused):
             await video.forward_device(dev)
         self.assertFalse(dev.grabbed)
         self.assertTrue(dev.closed)
@@ -86,11 +87,11 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui.forwarded, keys)
         self.assertEqual(ui.written, [])
 
-    async def test_dingtalk_wps_other_remote_buttons_are_verbatim(self):
+    async def test_dingtalk_other_remote_buttons_are_verbatim(self):
         keys = [(code, val)
                 for code in (ecodes.KEY_ENTER, ecodes.KEY_BACK,
                              ecodes.KEY_COMPOSE, ecodes.KEY_HOME,
-                             ecodes.KEY_GRAVE, ecodes.KEY_F5,
+                             ecodes.KEY_GRAVE,
                              ecodes.KEY_LEFTCTRL, ecodes.KEY_TAB,
                              ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN)
                 for val in (1,0)]
@@ -153,9 +154,8 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ui.forwarded,keys)
         self.assertEqual(ui.written,[])
 
-    async def test_browser_shortcuts_do_not_remap_back_or_volume(self):
-        keys=[(ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0),
-              (ecodes.KEY_VOLUMEUP,1),(ecodes.KEY_VOLUMEUP,0)]
+    async def test_browser_shortcuts_do_not_remap_volume(self):
+        keys=[(ecodes.KEY_VOLUMEUP,1),(ecodes.KEY_VOLUMEUP,0)]
         ui=await self.run_remote(keys,browser_focused=True)
         self.assertEqual(ui.forwarded,keys)
         self.assertEqual(ui.written,[])
@@ -289,6 +289,51 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
         keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,0)]
         ui=await self.run_remote(keys)
         self.assertEqual(ui.forwarded,keys)
+        self.assertEqual(ui.written,[])
+
+    async def test_browser_back_navigates_once_and_releases_alt(self):
+        keys=[(ecodes.KEY_BACK,1),(ecodes.KEY_BACK,2),(ecodes.KEY_BACK,0)]
+        ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.forwarded,[])
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,1),
+            (ecodes.EV_KEY,ecodes.KEY_LEFT,0),
+            (ecodes.EV_KEY,ecodes.KEY_LEFTALT,0)])
+        self.assertEqual(ui.syn_count,2)
+
+    async def test_back_bounce_cannot_navigate_multiple_times(self):
+        keys=[(ecodes.KEY_BACK,x) for x in (1,0,1,0)]
+        moments=iter([1.0,1.10])
+        with patch.object(video,"time",SimpleNamespace(monotonic=lambda: next(moments))):
+            ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(len(ui.written),4)
+        self.assertEqual(ui.forwarded,[])
+
+    async def test_wps_ok_and_back_are_scope_limited_and_balanced(self):
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),
+              (ecodes.KEY_ENTER,0),(ecodes.KEY_BACK,1),
+              (ecodes.KEY_BACK,2),(ecodes.KEY_BACK,0)]
+        ui=await self.run_remote(keys,wps_focused=True)
+        self.assertEqual(ui.forwarded,[])
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_F5,1),
+            (ecodes.EV_KEY,ecodes.KEY_F5,0),
+            (ecodes.EV_KEY,ecodes.KEY_ESC,1),
+            (ecodes.EV_KEY,ecodes.KEY_ESC,0)])
+        self.assertEqual(ui.syn_count,4)
+
+    async def test_non_wps_ok_and_back_remain_physical(self):
+        keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),(ecodes.KEY_ENTER,0),
+              (ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0)]
+        ui=await self.run_remote(keys)
+        self.assertEqual(ui.forwarded,keys)
+        self.assertEqual(ui.written,[])
+
+    async def test_microphone_f5_is_never_a_browser_refresh(self):
+        keys=[(ecodes.KEY_F5,1),(ecodes.KEY_F5,2),(ecodes.KEY_F5,0)]
+        ui=await self.run_remote(keys,browser_focused=True)
+        self.assertEqual(ui.forwarded,[])
         self.assertEqual(ui.written,[])
 
     def test_only_original_xiaomi_is_selected(self):

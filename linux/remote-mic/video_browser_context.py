@@ -43,6 +43,46 @@ def is_browser_application(app_name: str) -> bool:
     return normalized in _BROWSER_APP_NAMES
 
 
+def is_wps_presentation_application(app_name: str, frame_title: str) -> bool:
+    """Strictly distinguish WPS slide editor from Writer/Spreadsheets."""
+    app = ' '.join((app_name or '').strip().casefold().split())
+    title = (frame_title or '').casefold()
+    if app in {'wpp', 'wps presentation', 'wps 演示'}:
+        return True
+    if app not in {'wps office', 'wpsoffice', 'kingsoft office'}:
+        return False
+    return bool(re.search(r'\.(?:pptx?|dps)(?:\b|\s|\*)', title)
+                or 'wps 演示' in title or 'wps presentation' in title)
+
+
+def wps_presentation_focused() -> bool:
+    """Map slide keys only with unambiguous AT-SPI foreground evidence."""
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+        desktop = Atspi.get_desktop(0)
+        active_apps = []
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            try:
+                for j in range(app.get_child_count()):
+                    frame = app.get_child_at_index(j)
+                    if (frame.get_role_name() == 'frame' and
+                            frame.get_state_set().contains(Atspi.StateType.ACTIVE)):
+                        active_apps.append((app.get_name(), frame.get_name()))
+            except Exception:
+                continue
+        # GNOME/AT-SPI can report concurrent ACTIVE frames across apps.
+        # Refuse F5 when a browser also looks foreground.
+        if any(is_browser_application(app) for app, _ in active_apps):
+            return False
+        return any(is_wps_presentation_application(app, title)
+                   for app, title in active_apps)
+    except Exception:
+        return False
+
+
 def browser_window_focused() -> bool:
     """Whether the *foreground window* belongs to a supported web browser.
 
@@ -54,19 +94,23 @@ def browser_window_focused() -> bool:
         gi.require_version('Atspi', '2.0')
         from gi.repository import Atspi
         desktop = Atspi.get_desktop(0)
+        active_apps = []
         for i in range(desktop.get_child_count()):
             app = desktop.get_child_at_index(i)
             try:
-                if not is_browser_application(app.get_name()):
-                    continue
                 for j in range(app.get_child_count()):
                     frame = app.get_child_at_index(j)
                     if (frame.get_role_name() == 'frame' and
                             frame.get_state_set().contains(Atspi.StateType.ACTIVE)):
-                        return True
+                        active_apps.append((app.get_name(), frame.get_name()))
             except Exception:
                 continue
-        return False
+        # Never send browser shortcuts if the WPS editor is also ACTIVE.
+        # A false negative here is preferable to an accidental Ctrl+W.
+        if any(is_wps_presentation_application(app, title)
+               for app, title in active_apps):
+            return False
+        return any(is_browser_application(app) for app, _ in active_apps)
     except Exception:
         # Fail closed: leave the physical Home key unchanged if the desktop
         # accessibility service is unavailable.
