@@ -36,6 +36,41 @@ journalctl --user -fu xiaomi-remote-video-only.service -o cat
 curl http://127.0.0.1:18766/video/debug
 ```
 
+### 2026-10-10：Firefox / 夸克网盘连播与浏览器按键恢复记录
+
+Ubuntu 26 / GNOME Wayland / Firefox 157 的本机排查记录：`video_only_hid.py` 与仓库文件 SHA-256 一致，安全模式服务已启用；旧 `xiaomi-remote-hid-filter.service` 和 `xiaomi-remote-wps-linux.service` 处于 inactive，`xiaomi-chatgpt-web-bridge.service` 正常运行。浏览器按键失灵时，记录过 AT-SPI 无障碍总线套接字连接错误；**重启 HID 服务后重新抓取遥控器**。按键测试验证虚拟设备的 Ctrl+T、Ctrl+Tab、Ctrl+W 能送到 Firefox，但这**不等于所有实体按键在所有网站通过了实机验收**。用户随后反馈当前使用已恢复。
+
+出现浏览器小房子、三横杠、TV 按键失效时，先看服务和日志，不要启用竞争的旧完整映射，也不要全局重新绑定 Enter：
+
+```bash
+systemctl --user is-active xiaomi-remote-video-only.service
+systemctl --user is-active xiaomi-chatgpt-web-bridge.service
+systemctl --user is-active xiaomi-remote-hid-filter.service   # 应为 inactive
+systemctl --user is-active xiaomi-remote-wps-linux.service    # 应为 inactive
+journalctl --user -u xiaomi-remote-video-only.service -n 50 --no-pager
+# 蓝牙在线但按键服务失去正常上下文、或日志有 AT-SPI 连接异常时：
+systemctl --user restart xiaomi-remote-video-only.service
+systemctl --user status xiaomi-remote-video-only.service
+```
+
+只有出现 `safe video/browser filter grabbed ...` 才能说明 HID 被重新抓取；服务 `active` **本身不证明按键已生效**。重新测试浏览器里的小房子→新建、三横杠→切换、TV→关闭（注意先保存标签页内容）。验证 Enter、钉钉/WPS 普通输入和视频播放/倍速未受到影响。若按键在任意应用都失效，再检查蓝牙配对和 `/dev/input` 设备；**不可同时运行两个抓取同一物理遥控器的服务**。
+
+Firefox 当前机器上观察到 `media.autoplay.default=0`（允许视频自动播放）和 `media.block-autoplay-until-in-foreground=false`（不要求先把标签页切到前台）。为了让新机器**选择性复现**这两个设置，提供不修改 `prefs.js`、不读取 cookies 的配置脚本：
+
+```bash
+# 只查看 Firefox 当前 profile、prefs.js 和 user.js 设置（默认不写入）
+python3 linux/remote-mic/firefox-autoplay.py
+# 在仓库根目录运行；明确接受所有站点均允许自动播放后才执行：
+python3 linux/remote-mic/firefox-autoplay.py --apply
+# 更改 user.js 后完全退出、重开 Firefox 才能生效
+```
+
+支持 Firefox Snap / 非 Snap `profiles.ini` 中唯一默认 profile；有多个无法判定的配置时用 `--profile /path/to/your/firefox-profile` 显式指定。`--apply` 备份原 `user.js` 到**本机 profile**，保留其他配置，重复应用不会重复写入；绝不上传浏览器 profile。**代价是所有网站都可以尝试自动播放（包括带声音视频）**；不接受这种行为时不要运行 `--apply`，改为在 Firefox 地址栏左侧的网站权限中对指定网站单独允许自动播放。
+
+**重要边界：Firefox 允许自动播放 ≠ 夸克网盘会自动选择下一集。** 夸克的顺序播放/连续播放属于网站播放器或播放列表控制；本项目的 Global Speed、画中画和 HID 映射**不提供**“下一集”功能，也不应盲目向网站注入自动点击。若当前视频播完后未跳下一集，优先看网站列表和连播开关；若已跳转但停在暂停状态，再检查 Firefox 的自动播放权限。用户报告已恢复，但无法由静态配置检查证明特定站点的完整连续剧跨集播放。
+
+SAFE 模式本身不把 WPS 的 OK 映射成 F5；WPS OK→F5 / 返回→Esc 属于单独的旧完整模式，不能与 SAFE 同时运行。需要演示快捷键时先决定使用哪个模式，勿同时启动两个抓取设备的服务。
+
 回滚视频模式（**不会修改系统键盘，也不会自动恢复旧全功能映射**）：
 
 ```bash

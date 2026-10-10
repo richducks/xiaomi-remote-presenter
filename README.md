@@ -4,6 +4,8 @@ Turn a **Xiaomi Remote 2 Pro / Xiaomi Bluetooth Voice Remote** into a device-spe
 
 **[中文完整使用手册：按键表、Windows/macOS/Linux 安装、视频兼容与验收](docs/中文使用手册.md)**
 
+**Ubuntu / Firefox 连播恢复（2026-10-10）：** [诊断与恢复步骤](linux/remote-mic/README.md#2026-10-10firefox--夸克网盘连播与浏览器按键恢复记录) 包含 systemd 安全重启、浏览器快捷键检查，以及默认只读的 [Firefox 自动播放配置工具](linux/remote-mic/firefox-autoplay.py)。自动播放权限与网站的“下一集/连续播放”是两个不同的功能；浏览器全站点自动播放必须通过 `--apply` 自愿开启。
+
 The key design rule is: **never globally remap Enter/Back**. The remote reports OK as an Enter-like key, so each operating system uses a device-aware input layer.
 
 **Recommended SAFE profile (2026-10-09):** browser-only Home → new tab, Menu → next tab, TV → close tab, with ordinary Enter unaffected. [Linux](linux/remote-mic/README.md): run `bash install-services.sh --enable-video` (also handles video playback/speed) and optionally `bash pin-linux-safe.sh --backup` to persist a local rollback snapshot. [Windows](windows/README.md): `windows/install.ps1 -InstallDriver` defaults to `xiaomi_remote_safe.ahk`. [macOS](macos/README.md): `macos/install.sh --enable-safe` installs the device-scoped safe Karabiner rules with a configuration backup. The legacy full presentation/back mappings are opt-in. macOS video OK/speed require optional rules and may capture Enter/arrow keys even outside videos.
