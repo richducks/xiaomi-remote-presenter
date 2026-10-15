@@ -1,0 +1,49 @@
+name: RC003 Electron Linux Package
+on:
+  push:
+    tags:
+      - "v1.1.*"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Download official Electron runtime
+        run: |
+          curl --fail --location --retry 3 --retry-delay 3 --output "$GITHUB_WORKSPACE/electron.zip" "https://github.com/electron/electron/releases/download/v40.10.2/electron-v40.10.2-linux-x64.zip"
+          unzip -t "$GITHUB_WORKSPACE/electron.zip" > /dev/null
+      - name: Build Debian package and checksums
+        run: |
+          ELECTRON_ZIP="$GITHUB_WORKSPACE/electron.zip" bash linux/remote-mic/electron/build-deb.sh
+          dpkg-deb -f linux/remote-mic/electron/dist/xiaomi-remote-control_1.1.0_amd64.deb Package Version Architecture
+          sha256sum linux/remote-mic/electron/dist/xiaomi-remote-control_1.1.0_amd64.deb > linux/remote-mic/electron/dist/SHA256SUMS
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc003-linux-amd64
+          path: |
+            linux/remote-mic/electron/dist/*.deb
+            linux/remote-mic/electron/dist/SHA256SUMS
+      - name: Publish GitHub prerelease
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          name: RC003 Electron v1.1.0 Linux Preview
+          body: |
+            Xiaomi RC003 Electron visual profiles for Ubuntu Linux x64.
+            Eight configuration pages, BLE-HID fallback, WeChat fullscreen dictation improvements and volume reports.
+            Linux Python/systemd runtime must be installed separately. Volume and WeChat fullscreen still need hardware validation.
+            Documentation: docs/RC003-Electron-配置中心.md
+          files: |
+            linux/remote-mic/electron/dist/*.deb
+            linux/remote-mic/electron/dist/SHA256SUMS
