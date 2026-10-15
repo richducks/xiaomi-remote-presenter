@@ -11,7 +11,7 @@ Ubuntu 构建：运行 ./electron/build-deb.sh；Debian 安装包在 electron/di
 Electron 窗口开启 sandbox / contextIsolation 且禁用 nodeIntegration。不会运行第二个 HID 监听，不访问网站，不自动提交聊天文字。
 \nV1.0.1 显示原生 HID / BLE GATT 桥接模式，并将兼容桥纳入服务管理。\n
 
-## 图形化配置（v1.1.0）
+## 图形化配置（v1.1.1）
 应用包含：设备概览、浏览器、ChatGPT、WPS 演示、微信语音、系统音量、方案与备份、诊断。
 对应用可增加/修改/删除按键映射，界面输入校验后还会由原 Python RuleBook 校验；
 微信语音设置同样校验并备份。导入方案先预览后保存。

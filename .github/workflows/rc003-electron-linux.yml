@@ -24,8 +24,8 @@ jobs:
       - name: Build Debian package and checksums
         run: |
           ELECTRON_ZIP="$GITHUB_WORKSPACE/electron.zip" bash linux/remote-mic/electron/build-deb.sh
-          dpkg-deb -f linux/remote-mic/electron/dist/xiaomi-remote-control_1.1.0_amd64.deb Package Version Architecture
-          sha256sum linux/remote-mic/electron/dist/xiaomi-remote-control_1.1.0_amd64.deb > linux/remote-mic/electron/dist/SHA256SUMS
+          dpkg-deb -f linux/remote-mic/electron/dist/xiaomi-remote-control_*_amd64.deb Package Version Architecture
+          sha256sum linux/remote-mic/electron/dist/xiaomi-remote-control_*_amd64.deb > linux/remote-mic/electron/dist/SHA256SUMS
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -38,7 +38,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
-          name: RC003 Electron v1.1.0 Linux Preview
+          name: RC003 Electron Linux Preview
           body: |
             Xiaomi RC003 Electron visual profiles for Ubuntu Linux x64.
             Eight configuration pages, BLE-HID fallback, WeChat fullscreen dictation improvements and volume reports.

@@ -103,7 +103,7 @@ async function exportRules(raw){
  if(dest.canceled||!dest.filePath)return "已取消导出";
  const obj=JSON.parse(raw);
  if(obj?.version!==1||!Array.isArray(obj.rules))throw Error("不合法的配置");
- fs.writeFileSync(dest.filePath,raw.endsWith("\\n")?raw:raw+"\\n",{mode:0o600});
+ fs.writeFileSync(dest.filePath,raw,{mode:0o600});
  return "规则已导出，可分享给其他用户（请自行确认内容）。";
 }
 const methods={

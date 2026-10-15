@@ -6,6 +6,7 @@ if [ -z "$zip" ]; then
   zip="$(find "$HOME/.cache/electron" -type f -name 'electron-v40.10.2-linux-x64.zip' -print -quit)"
 fi
 test -f "$zip" || { echo "Electron 40.10.2 Linux x64 ZIP not found" >&2; exit 2; }
+version="$(node -p "require('$base/package.json').version")"
 node "$base/tests/smoke.cjs"
 for f in "$base/"*.cjs; do node --check "$f"; done
 tmp="$(mktemp -d)"
@@ -32,9 +33,9 @@ Terminal=false
 Categories=Utility;Settings;
 StartupNotify=true
 DESKTOP
-cat >"$dest/DEBIAN/control" <<'CONTROL'
+cat >"$dest/DEBIAN/control" <<CONTROL
 Package: xiaomi-remote-control
-Version: 1.1.0
+Version: $version
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -46,5 +47,5 @@ chmod 755 "$target/electron"
 # .deb installs as root; SUID sandbox helper needs owner root and mode 4755.
 chmod 4755 "$target/chrome-sandbox"
 mkdir -p "$base/dist"
-dpkg-deb --root-owner-group --build "$dest" "$base/dist/xiaomi-remote-control_1.1.0_amd64.deb"
-echo "Built $base/dist/xiaomi-remote-control_1.1.0_amd64.deb"
+dpkg-deb --root-owner-group --build "$dest" "$base/dist/xiaomi-remote-control_"$version"_amd64.deb"
+echo "Built $base/dist/xiaomi-remote-control_"$version"_amd64.deb"

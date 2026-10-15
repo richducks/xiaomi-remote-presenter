@@ -1,6 +1,6 @@
 # 小米遥控器 2 Pro · Electron 配置客户端
 
-适用设备：小米 RC003，VID 2717 / PID 32B8。当前版本是 Linux x64 v1.1.0。Windows/macOS 的原生按键后端见仓库对应目录；Linux deb 不可用于 Windows/macOS。
+适用设备：小米 RC003，VID 2717 / PID 32B8。当前版本是 Linux x64 v1.1.1。Windows/macOS 的原生按键后端见仓库对应目录；Linux deb 不可用于 Windows/macOS。
 
 ## 小白操作
 
@@ -13,7 +13,7 @@
 
 在 Ubuntu GNOME 系统上从本目录运行 bash install.sh 部署 Python BLE 后端，运行 bash install-services.sh --enable-video 配置服务。
 当 BlueZ 连接遥控器但没有对应 HID 设备时，运行 bash install-gatt-fallback.sh。兼容桥会检测原生 HID 并让位。
-从 GitHub Releases 获取版本匹配的 xiaomi-remote-control_1.1.0_amd64.deb，确认来源后通过 Ubuntu 包管理器安装，随后运行 bash electron/install-linux-desktop.sh 设置本地后台目录。
+从 GitHub Releases 获取版本匹配的 xiaomi-remote-control_1.1.1_amd64.deb，确认来源后通过 Ubuntu 包管理器安装，随后运行 bash electron/install-linux-desktop.sh 设置本地后台目录。
 开发者可直接使用 bash electron/build-deb.sh 构建本机发行包；已配置操作系统授权的开发机可运行 bash electron/build-and-upgrade.sh 来打包、校验、安装。
 本程序依赖 Python/systemd 后端；单装 Electron 不能代替蓝牙和音频驱动。
 

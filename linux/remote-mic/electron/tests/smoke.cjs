@@ -13,4 +13,5 @@ assert.ok(main.includes("Trusted:")&&main.includes("2717p32b8"));
 assert.ok(main.includes("xiaomi-remote-gatt-key-bridge.service"));
 assert.ok(main.includes("Xiaomi RC003 GATT Key Proxy"));
 assert.ok(renderer.includes("textContent")&&!renderer.includes("innerHTML"));
+assert.ok(main.includes('fs.writeFileSync(dest.filePath,raw,{mode:0o600});'), "Export should preserve valid JSON without literal backslash-n");
 console.log("Electron contracts passed");
