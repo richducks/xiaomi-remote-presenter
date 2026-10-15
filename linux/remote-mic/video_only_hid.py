@@ -14,8 +14,14 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from time import sleep as key_sleep
 
 from evdev import InputDevice, UInput, ecodes, list_devices
+
+from remote_rules import RuleBook
+from wps_focus_recovery import (
+    WPS_RESUME_SECONDS, ensure_wps_editor_focus, safe_to_resume_wps,
+)
 
 from video_browser_context import (
     browser_window_focused,
@@ -33,6 +39,11 @@ VIRTUAL_NAME = "Xiaomi Remote Video Only"
 # Never grab another remapper's virtual output.
 VIRTUAL_DEVICE_NAMES = {VIRTUAL_NAME, "Xiaomi Remote 2 Pro Filtered"}
 SPEED_KEYS = {ecodes.KEY_UP: ecodes.KEY_D, ecodes.KEY_DOWN: ecodes.KEY_A}
+# RC003 volume buttons remain GNOME / PipeWire system media keys; they
+# must never be taken over by browser-video or ChatGPT shortcuts. Forward
+# the physical down / auto-repeat / release sequence without synthesizing taps.
+SYSTEM_VOLUME_KEYS = frozenset({ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN,
+                                ecodes.KEY_MUTE})
 OK_KEYS = {ecodes.KEY_ENTER, ecodes.KEY_OK}
 BACK_KEYS = {ecodes.KEY_BACK}
 BLOCK_PHYSICAL_F5 = ecodes.KEY_F5  # Prevent RC003 microphone-key browser refresh.
@@ -55,6 +66,74 @@ BROWSER_SHORTCUT_COOLDOWNS = {
     ecodes.KEY_LEFT: 0.45,
 }
 PIP_ENDPOINT = "http://127.0.0.1:18766/video/emit"
+CHATGPT_ACTIVE = "http://127.0.0.1:18766/chatgpt/active"
+CHATGPT_DRAFT_READY = "http://127.0.0.1:18766/chatgpt/draft-ready"
+CHATGPT_TRIGGER = "http://127.0.0.1:18766/chatgpt/trigger"
+WECHAT_DRAFT_READY = "http://127.0.0.1:18766/wechat/draft-ready"
+WECHAT_SEND = "http://127.0.0.1:18766/wechat/send"
+
+
+def chatgpt_window_focused() -> bool:
+    """Require compositor-confirmed browser AND live foreground JS tab."""
+    if not browser_window_focused():
+        return False
+    try:
+        with urllib.request.urlopen(CHATGPT_ACTIVE, timeout=0.22) as reply:
+            return json.load(reply).get("active") is True
+    except (OSError, TimeoutError, ValueError, urllib.error.URLError):
+        return False
+
+
+def chatgpt_draft_ready() -> bool:
+    """Intercept remote OK only for a focused ChatGPT draft awaiting review."""
+    if not browser_window_focused():
+        return False
+    try:
+        with urllib.request.urlopen(CHATGPT_DRAFT_READY, timeout=0.22) as reply:
+            return json.load(reply).get("ready") is True
+    except (OSError, TimeoutError, ValueError, urllib.error.URLError):
+        return False
+
+
+def emit_chatgpt_action(action: str) -> bool:
+    """Queue action to focused ChatGPT page; never inject system Enter."""
+    if action not in ("new_chat", "voice_toggle", "send"):
+        return False
+    request = urllib.request.Request(
+        CHATGPT_TRIGGER,
+        data=json.dumps({"action": action}).encode(),
+        headers={"Content-Type": "application/json", "X-Xiaomi-Remote-HID": "1"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=0.3) as reply:
+            return json.load(reply).get("ok") is True
+    except (OSError, TimeoutError, ValueError, urllib.error.URLError):
+        return False
+
+
+
+def wechat_draft_state() -> tuple[bool, bool]:
+    """Return (ready, busy). An early OK must not send an old draft."""
+    try:
+        with urllib.request.urlopen(WECHAT_DRAFT_READY, timeout=0.35) as reply:
+            data = json.load(reply)
+            return data.get('ready') is True, data.get('busy') is True
+    except (OSError, TimeoutError, ValueError, urllib.error.URLError):
+        return False, False
+
+
+def send_wechat_draft() -> bool:
+    request = urllib.request.Request(
+        WECHAT_SEND, data=b'{}', method='POST',
+        headers={'Content-Type': 'application/json',
+                 'X-Xiaomi-Remote-HID': '1'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=0.7) as reply:
+            return json.load(reply).get('ok') is True
+    except (OSError, TimeoutError, ValueError, urllib.error.URLError):
+        return False
 
 
 def find_remote() -> InputDevice | None:
@@ -102,6 +181,9 @@ def tap(ui: UInput, key: int) -> None:
     """Complete a keypress before application focus can change."""
     ui.write(ecodes.EV_KEY, key, 1)
     ui.syn()
+    # A zero-duration tap is occasionally missed by GNOME/Firefox under
+    # load. Hold only synthesized remote actions, never physical Enter.
+    key_sleep(0.035)
     ui.write(ecodes.EV_KEY, key, 0)
     ui.syn()
 
@@ -110,6 +192,9 @@ def modified_tap(ui: UInput, modifier: int, key: int) -> None:
     ui.write(ecodes.EV_KEY, modifier, 1)
     ui.write(ecodes.EV_KEY, key, 1)
     ui.syn()
+    # Empirical GNOME/Firefox verification succeeded with ~60ms held
+    # Ctrl+Tab. The prior immediate release had no dwell at all.
+    key_sleep(0.060)
     ui.write(ecodes.EV_KEY, key, 0)
     ui.write(ecodes.EV_KEY, modifier, 0)
     ui.syn()
@@ -131,9 +216,16 @@ async def forward_device(device: InputDevice) -> None:
     )
     video_held: set[int] = set()
     ok_held: set[int] = set()
-    browser_tab_held: set[int] = set()
-    back_held: set[int] = set()
-    last_shortcut_at: dict[int, float] = {}
+    last_ok_submit_at = -float("inf")
+    # Exactly one owning evdev grab; app-scoped rules are interpreted here.
+    rules = RuleBook()
+    rule_held: set[int] = set()
+    last_rule_at: dict[tuple[str, int | None, int], float] = {}
+    last_passthrough_log_at: dict[int, float] = {}
+    # A WPS Back->Esc can destroy the slideshow XWayland window while the
+    # editor remains open but no longer accepts synthetic F5 until activated.
+    wps_resume_until = 0.0
+    wps_editor_repair_pending = False
     try:
         device.grab()
         LOG.info("unified safe filter grabbed %s %s; ordinary Enter untouched",
@@ -150,47 +242,101 @@ async def forward_device(device: InputDevice) -> None:
             if code == BLOCK_PHYSICAL_F5:
                 continue
 
-            if code in back_held:
-                if value == 0:
-                    back_held.discard(code)
+            # Media volume belongs to Ubuntu even when a video, WPS or
+            # ChatGPT window is focused. Do not run app rules or video probes.
+            if code in SYSTEM_VOLUME_KEYS:
+                ui.write_event(event)
                 continue
-            if code in BACK_KEYS and value == 1:
-                if await asyncio.to_thread(wps_presentation_focused):
-                    back_held.add(code)
-                    tap(ui, ecodes.KEY_ESC)
-                    LOG.info("WPS Back -> Escape")
-                    continue
-                if await asyncio.to_thread(browser_window_focused):
-                    back_held.add(code)
+
+            # Consume matching up/repeat even after the shortcut switches
+            # focus. NEVER create unpaired Ctrl/Alt or a stray physical Enter.
+            if code in rule_held:
+                if value == 0:
+                    rule_held.discard(code)
+                continue
+            if value == 1:
+                selected = None
+                wps_needs_recovery = False
+                wps_is_focused = False
+                for rule in rules.candidates(code):
+                    if rule.scope == "wps":
+                        wps_is_focused = await asyncio.to_thread(wps_presentation_focused)
+                        # A previous WPS Back (Esc) explicitly arms a brief
+                        # recovery window. Never reactivate WPS from a browser,
+                        # other application, or without that prior WPS Back.
+                        wps_needs_recovery = (
+                            code in OK_KEYS and (
+                                (wps_editor_repair_pending and wps_is_focused)
+                                or time.monotonic() < wps_resume_until
+                            )
+                        )
+                        safe_resume = (
+                            wps_needs_recovery and
+                            time.monotonic() < wps_resume_until and
+                            await asyncio.to_thread(safe_to_resume_wps)
+                        )
+                        if wps_is_focused or safe_resume:
+                            selected = rule
+                            break
+                        continue
+                    probe = {
+                        "chatgpt": chatgpt_window_focused,
+                        "browser": browser_window_focused,
+                    }[rule.scope]
+                    if await asyncio.to_thread(probe):
+                        selected = rule
+                        break
+                if selected is not None:
+                    rule_held.add(code)
+                    ident = (selected.scope, selected.modifier_code,
+                             selected.key_code, selected.action)
                     now = time.monotonic()
-                    target = ecodes.KEY_LEFT
-                    if now - last_shortcut_at.get(target, -float('inf')) >= BROWSER_SHORTCUT_COOLDOWNS[target]:
-                        last_shortcut_at[target] = now
-                        modified_tap(ui, ecodes.KEY_LEFTALT, target)
-                        LOG.info("browser Back -> Alt+Left")
+                    if now - last_rule_at.get(ident, -float("inf")) >= selected.cooldown_ms / 1000.0:
+                        last_rule_at[ident] = now
+                        if selected.scope == "wps":
+                            if code in BACK_KEYS:
+                                wps_resume_until = now + WPS_RESUME_SECONDS
+                                # After the short desktop-helper window expires,
+                                # still repair WPS when it actually has focus.
+                                # Never use this flag to steal focus from a browser.
+                                wps_editor_repair_pending = True
+                                LOG.info("WPS Esc: recovery armed for %.1fs", WPS_RESUME_SECONDS)
+                            elif wps_needs_recovery:
+                                # XWayland editor sometimes loses focus after
+                                # closing the slideshow. Restore the editor
+                                # before sending F5, only on this explicit OK.
+                                restored = await asyncio.to_thread(ensure_wps_editor_focus)
+                                LOG.info("WPS resume focus restored=%s", restored)
+                                if not restored and not (
+                                    wps_is_focused and
+                                    await asyncio.to_thread(wps_presentation_focused)
+                                ):
+                                    LOG.warning("WPS resume cancelled: no safe editor window")
+                                    continue
+                                wps_resume_until = 0.0
+                                wps_editor_repair_pending = False
+                        if selected.action:
+                            ok = await asyncio.to_thread(emit_chatgpt_action,
+                                                         selected.action)
+                            LOG.info("remote action %s queued=%s", selected.action, ok)
+                        elif selected.modifier_code is None:
+                            tap(ui, selected.key_code)
+                        else:
+                            modified_tap(ui, selected.modifier_code,
+                                         selected.key_code)
+                        LOG.info("remote rule %s applied in %s",
+                                 selected.id, selected.scope)
+                    else:
+                        LOG.debug("remote rule %s bounced; ignored", selected.id)
                     continue
 
-            # Decide on physical down; swallow its matching repeat and
-            # release even if the Ctrl shortcut changes focus. This prevents
-            # stray tab switches/closes in unrelated applications.
-            if code in browser_tab_held:
-                if value == 0:
-                    browser_tab_held.discard(code)
-                continue
-            if (code in BROWSER_TAB_KEYS and value == 1
-                    and await asyncio.to_thread(browser_window_focused)):
-                browser_tab_held.add(code)
-                target = BROWSER_TAB_KEYS[code]
+            # Only navigation key names, never text, in diagnostics.
+            if code in BROWSER_TAB_KEYS and value == 1:
                 now = time.monotonic()
-                if (now - last_shortcut_at.get(target, -float("inf"))
-                        < BROWSER_SHORTCUT_COOLDOWNS[target]):
-                    LOG.debug("noisy browser key suppressed: %s", ecodes.KEY[code])
-                    continue
-                last_shortcut_at[target] = now
-                ctrl_tap(ui, target)
-                LOG.info("browser tab: %s -> Ctrl+%s",
-                         ecodes.KEY[code], ecodes.KEY[target])
-                continue
+                if now - last_passthrough_log_at.get(code, -float('inf')) > 10:
+                    last_passthrough_log_at[code] = now
+                    LOG.info("remote navigation %s pass-through: browser not confirmed",
+                             ecodes.KEY[code])
 
             if code in video_held:
                 if value == 0:
@@ -216,10 +362,25 @@ async def forward_device(device: InputDevice) -> None:
                     ok_held.discard(code)
                 continue
             if code in OK_KEYS and value == 1:
-                if await asyncio.to_thread(wps_presentation_focused):
+                # WeChat's transcribed text stays visible until user OK.
+                wechat_ready, wechat_busy = await asyncio.to_thread(wechat_draft_state)
+                if wechat_ready or wechat_busy:
                     ok_held.add(code)
-                    tap(ui, ecodes.KEY_F5)
-                    LOG.info("WPS OK -> F5")
+                    now = time.monotonic()
+                    if wechat_ready and now - last_ok_submit_at >= 0.9:
+                        last_ok_submit_at = now
+                        sent = await asyncio.to_thread(send_wechat_draft)
+                        LOG.info('WeChat OK send=%s', sent)
+                    continue
+                # In ChatGPT a reviewed, nonempty draft requires a manual OK.
+                # Elsewhere preserve WPS, video and native Enter handling.
+                if await asyncio.to_thread(chatgpt_draft_ready):
+                    ok_held.add(code)
+                    now = time.monotonic()
+                    if now-last_ok_submit_at >= 0.9:
+                        last_ok_submit_at=now
+                        queued=await asyncio.to_thread(emit_chatgpt_action,"send")
+                        LOG.info("remote OK reviewed draft submit queued=%s",queued)
                     continue
                 if await asyncio.to_thread(toggle_browser_play_pause):
                     ok_held.add(code)

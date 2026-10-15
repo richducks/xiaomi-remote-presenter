@@ -5,6 +5,7 @@ from pathlib import Path
 from collections import deque
 from contextlib import suppress
 from aiohttp import web
+from wechat_dictation import WechatDictation, wechat_window, prewarm_wechat_keyboard
 
 LOG=logging.getLogger('xiaomi-chatgpt-web-bridge')
 REMOTE_SOURCE='xiaomi_remote_mic_sink.monitor'
@@ -17,6 +18,83 @@ class Bridge:
         self.video_events=deque(maxlen=64)
         self.video_clients={}
         self.video_results=deque(maxlen=30)
+        # ChatGPT tabs report foreground presence; no window-title guesses.
+        self.chatgpt_clients={}
+        self.chatgpt_action_time={}
+        self.wechat = WechatDictation()
+    def active_chatgpt_client(self):
+        now=time.monotonic()
+        self.chatgpt_clients={cid:data for cid,data in self.chatgpt_clients.items()
+                              if now-data['seen']<6}
+        focused=[cid for cid,data in self.chatgpt_clients.items()
+                 if data['visible'] and data['focused'] and data['version']>=2]
+        return focused[0] if len(focused)==1 else None
+
+    async def chatgpt_heartbeat(self,request):
+        if request.headers.get('X-Xiaomi-ChatGPT')!='1' or request.headers.get('Origin') not in (None,'https://chatgpt.com'):
+            return web.Response(status=403)
+        try:
+            d=await request.json()
+            cid=d.get('id')
+            if not isinstance(cid,str) or not 8<=len(cid)<=100:
+                raise ValueError('invalid client')
+            if d.get('url')!='https://chatgpt.com':
+                raise ValueError('not ChatGPT origin')
+            self.chatgpt_clients[cid]={
+                'seen':time.monotonic(),'visible':d.get('visible') is True,
+                'focused':d.get('focused') is True,
+                'version':int(d.get('version',0)),
+                # A v0.6+ foreground script reports that draft text is
+                # available and no dictation is still being finalized.
+                'draft_ready':int(d.get('version',0))>=3 and d.get('draftReady') is True,
+            }
+            return web.json_response({'ok':True})
+        except (ValueError,TypeError,KeyError):
+            return web.Response(status=400)
+
+    async def chatgpt_active(self,request):
+        return web.json_response({'active':self.active_chatgpt_client() is not None})
+
+    async def chatgpt_draft_ready(self,request):
+        cid=self.active_chatgpt_client()
+        return web.json_response({'ready':cid is not None and
+                                  self.chatgpt_clients[cid]['draft_ready']})
+
+    async def chatgpt_trigger(self,request):
+        # Only local Python HID can request an action. Browsers must not
+        # be allowed to submit messages by issuing cross-origin requests.
+        if request.headers.get('Origin') is not None or request.headers.get('X-Xiaomi-Remote-HID')!='1':
+            return web.Response(status=403)
+        try:
+            d=await request.json()
+            action=d.get('action')
+        except (ValueError,TypeError):
+            return web.Response(status=400)
+        if action not in ('new_chat','voice_toggle','send'):
+            return web.Response(status=400)
+        cid=self.active_chatgpt_client()
+        if cid is None:
+            return web.json_response({'ok':False,'reason':'no-focused-tab'},status=409)
+        now=time.monotonic()
+        # Guard repeats from firmware even if HID emits multiple pairs.
+        if now-self.chatgpt_action_time.get(action,-float('inf'))<0.40:
+            return web.json_response({'ok':False,'reason':'debounced'},status=429)
+        self.chatgpt_action_time[action]=now
+        await self.emit(action,target=cid)
+        return web.json_response({'ok':True,'action':action})
+
+    async def wechat_draft_ready(self, request):
+        ready = await asyncio.to_thread(self.wechat.draft_ready)
+        busy = self.wechat.busy() and await asyncio.to_thread(wechat_window) is not None
+        return web.json_response({'ready': ready, 'busy': busy})
+
+    async def wechat_send(self, request):
+        # Local HID only. Browser pages cannot trigger WeChat messages.
+        if request.headers.get('Origin') is not None or request.headers.get('X-Xiaomi-Remote-HID') != '1':
+            return web.Response(status=403)
+        sent = await self.wechat.send()
+        return web.json_response({'ok': sent}, status=200 if sent else 409)
+
     def active_video_clients(self):
         now=time.monotonic()
         self.video_clients={
@@ -175,8 +253,9 @@ class Bridge:
     async def next_events(self,request):
         try: cursor=int(request.query.get('cursor','0'))
         except: cursor=0
+        if cursor>self.seq or cursor<0: cursor=self.seq
         async with self.cond:
-            def collect(): return [(s,e) for s,e in self.events if s>cursor]
+            def collect(): return [(s,e) for s,e in self.events if s>cursor and (not e.get('target') or e.get('target')==request.query.get('client'))]
             items=collect()
             if not items:
                 try: await asyncio.wait_for(self.cond.wait(),timeout=25)
@@ -219,9 +298,19 @@ class Bridge:
                     await asyncio.sleep(.1); continue
                 line=raw.decode('utf-8','replace')
                 if 'ATVV control: audio_start' in line:
-                    await self.select_remote(); await self.emit('voice_start')
+                    await self.select_remote()
+                    try:
+                        await self.wechat.start()
+                    except Exception:
+                        LOG.exception('optional WeChat recorder failed to start')
+                    await self.emit('voice_start')
                 elif 'ATVV control: audio_stop' in line:
-                    await self.emit('voice_stop'); await self.restore_later()
+                    try:
+                        await self.wechat.stop()
+                    except Exception:
+                        LOG.exception('optional WeChat recorder failed to stop')
+                    # Keep existing ChatGPT preview/OK behavior unchanged.
+                    await self.emit('voice_release'); await self.restore_later()
         finally:
             p.terminate()
             with suppress(Exception): await asyncio.wait_for(p.wait(),timeout=2)
@@ -233,6 +322,18 @@ async def main():
         text=Path('chatgpt-web/xiaomi-chatgpt.user.js').read_text()
         return web.Response(text=text,content_type='application/javascript')
     app.router.add_get('/xiaomi-chatgpt.user.js',user_script)
+    # Old Tampermonkey installations probe this derived URL for version.
+    async def chatgpt_script_metadata(request):
+        source=Path('chatgpt-web/xiaomi-chatgpt.user.js').read_text(encoding='utf-8')
+        header=source.split('// ==/UserScript==',1)[0]+'// ==/UserScript==\n'
+        return web.Response(text=header, content_type='application/javascript')
+    app.router.add_get('/xiaomi-chatgpt.meta.js',chatgpt_script_metadata)
+    app.router.add_post('/chatgpt/heartbeat',b.chatgpt_heartbeat)
+    app.router.add_get('/chatgpt/active',b.chatgpt_active)
+    app.router.add_get('/chatgpt/draft-ready',b.chatgpt_draft_ready)
+    app.router.add_post('/chatgpt/trigger',b.chatgpt_trigger)
+    app.router.add_get('/wechat/draft-ready', b.wechat_draft_ready)
+    app.router.add_post('/wechat/send', b.wechat_send)
     async def video_script(request):
         source=Path('chatgpt-web/xiaomi-video-speed.user.js').read_text(encoding='utf-8')
         return web.Response(text=source,content_type='application/javascript')
@@ -248,10 +349,12 @@ async def main():
     app.router.add_post('/video/report',b.video_report)
     app.router.add_get('/video/debug',b.video_debug)
     app.router.add_get('/next',b.next_events); app.router.add_post('/status',b.status); app.router.add_route('OPTIONS','/{tail:.*}',b.options)
-    runner=web.AppRunner(app); await runner.setup(); site=web.TCPSite(runner,'127.0.0.1',18766); await site.start()
+    runner=web.AppRunner(app, access_log=None); await runner.setup(); site=web.TCPSite(runner,'127.0.0.1',18766); await site.start()
     LOG.info('userscript bridge listening http://127.0.0.1:18766')
+    # Warm only the input device, not the STT engine; zero injected keys.
+    keyboard_warmup = asyncio.create_task(prewarm_wechat_keyboard())
     stop=asyncio.Event(); loop=asyncio.get_running_loop()
     for sig in (signal.SIGINT,signal.SIGTERM):
         with suppress(NotImplementedError): loop.add_signal_handler(sig,stop.set)
-    task=asyncio.create_task(b.follow()); await stop.wait(); task.cancel(); await asyncio.gather(task,return_exceptions=True); await runner.cleanup()
+    task=asyncio.create_task(b.follow()); await stop.wait(); task.cancel(); keyboard_warmup.cancel(); await asyncio.gather(task,keyboard_warmup,return_exceptions=True); await runner.cleanup()
 if __name__=='__main__': asyncio.run(main())

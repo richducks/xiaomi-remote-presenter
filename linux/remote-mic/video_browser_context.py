@@ -55,89 +55,167 @@ def is_wps_presentation_application(app_name: str, frame_title: str) -> bool:
                 or 'wps 演示' in title or 'wps presentation' in title)
 
 
+def _active_frames(desktop: Any, atspi: Any) -> list[tuple[str, Any]]:
+    """List AT-SPI ACTIVE frames, including unrelated applications."""
+    found = []
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        try:
+            for j in range(app.get_child_count()):
+                frame = app.get_child_at_index(j)
+                if (frame.get_role_name() == 'frame' and
+                        frame.get_state_set().contains(atspi.StateType.ACTIVE)):
+                    found.append((app.get_name() or '', frame))
+        except Exception:
+            continue
+    return found
+
+
+def _contains_focused_descendant(frame: Any, atspi: Any) -> bool:
+    """Look for actual keyboard focus, only when ACTIVE flags conflict.
+
+    GNOME Wayland sometimes advertises two simultaneously ACTIVE windows,
+    one of which is stale. Bounded traversal avoids unbounded browser trees.
+    """
+    from collections import deque
+    queue = deque([(frame, 0)])
+    examined = 0
+    while queue and examined < 500:
+        child, depth = queue.popleft()
+        examined += 1
+        try:
+            if child.get_state_set().contains(atspi.StateType.FOCUSED):
+                return True
+            if depth < 10:
+                for index in range(min(child.get_child_count(), 50)):
+                    queue.append((child.get_child_at_index(index), depth + 1))
+        except Exception:
+            continue
+    return False
+
+
+def _foreground_frame(desktop: Any, atspi: Any) -> tuple[str, Any] | None:
+    """Choose one actual focused frame, otherwise refuse risky remaps."""
+    frames = _active_frames(desktop, atspi)
+    if len(frames) == 1:
+        return frames[0]
+    if not frames:
+        return None
+    focused = [(app, frame) for app, frame in frames
+               if _contains_focused_descendant(frame, atspi)]
+    # A false negative is safer than Ctrl+W or F5 in the wrong application.
+    return focused[0] if len(focused) == 1 else None
+
+
+def _compositor_window() -> tuple[str, str, str] | None:
+    """GNOME Shell's actual focus (app ID, WM class, title), or unavailable.
+
+    A tiny read-only local GNOME extension exports this information. Unlike
+    AT-SPI ACTIVE flags, Mutter's focus_window reflects Wayland window focus.
+    None means the extension is absent, NOT that the foreground is a browser.
+    """
+    try:
+        import gi
+        gi.require_version('Gio', '2.0')
+        from gi.repository import Gio, GLib
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        result = bus.call_sync(
+            'org.gnome.Shell',
+            '/org/gnome/Shell/Extensions/XiaomiRemoteFocus',
+            'org.xiaomi.RemoteFocus', 'GetFocus', None,
+            GLib.VariantType('(sss)'), Gio.DBusCallFlags.NO_AUTO_START,
+            600, None)
+        return tuple(result.unpack())
+    except Exception:
+        return None
+
+
+def _shell_browser_kind(app_id: str, wm_class: str) -> str | None:
+    """Classify trusted compositor app identity, never a window title."""
+    tokens = set(re.split(r'[^a-z0-9]+',
+                          ((app_id or '') + ' ' + (wm_class or '')).casefold()))
+    if tokens.intersection({'firefox', 'librewolf', 'waterfox', 'floorp'}):
+        return 'firefox'
+    if tokens.intersection({'chrome', 'chromium', 'brave', 'edge', 'msedge',
+                            'vivaldi', 'opera', 'epiphany', 'falkon',
+                            'midori', 'qutebrowser', 'zen'}):
+        return 'chromium'
+    return None
+
+
+def _shell_wps_presentation(app_id: str, wm_class: str, title: str) -> bool:
+    identity = (app_id + ' ' + wm_class).casefold()
+    tokens = set(re.split(r'[^a-z0-9]+', identity))
+    if 'wpp' in tokens:
+        return True
+    if {'wps', 'wpsoffice', 'kingsoft'}.intersection(tokens):
+        return bool(re.search(r'\.(?:pptx?|dps)(?:\b|\s|\*)', title.casefold())
+                    or 'wps 演示' in title.casefold()
+                    or 'wps presentation' in title.casefold())
+    return False
+
+
 def wps_presentation_focused() -> bool:
-    """Map slide keys only with unambiguous AT-SPI foreground evidence."""
+    """Only map WPS when the compositor confirms the slide editor."""
+    shell = _compositor_window()
+    if shell is not None:
+        return _shell_wps_presentation(*shell)
     try:
         import gi
         gi.require_version('Atspi', '2.0')
         from gi.repository import Atspi
-        desktop = Atspi.get_desktop(0)
-        active_apps = []
-        for i in range(desktop.get_child_count()):
-            app = desktop.get_child_at_index(i)
-            try:
-                for j in range(app.get_child_count()):
-                    frame = app.get_child_at_index(j)
-                    if (frame.get_role_name() == 'frame' and
-                            frame.get_state_set().contains(Atspi.StateType.ACTIVE)):
-                        active_apps.append((app.get_name(), frame.get_name()))
-            except Exception:
-                continue
-        # GNOME/AT-SPI can report concurrent ACTIVE frames across apps.
-        # Refuse F5 when a browser also looks foreground.
-        if any(is_browser_application(app) for app, _ in active_apps):
-            return False
-        return any(is_wps_presentation_application(app, title)
-                   for app, title in active_apps)
+        selected = _foreground_frame(Atspi.get_desktop(0), Atspi)
+        return bool(selected and
+                    is_wps_presentation_application(selected[0],
+                                                    selected[1].get_name()))
     except Exception:
         return False
 
 
 def browser_window_focused() -> bool:
-    """Whether the *foreground window* belongs to a supported web browser.
-
-    Does not require playback/MPRIS, so browser Home -> Ctrl+T and TV
-    -> Ctrl+W also work on ordinary pages without any media support.
-    """
+    """Map browser shortcuts only when the actual foreground is a browser."""
+    shell = _compositor_window()
+    if shell is not None:
+        return _shell_browser_kind(shell[0], shell[1]) is not None
     try:
         import gi
         gi.require_version('Atspi', '2.0')
         from gi.repository import Atspi
-        desktop = Atspi.get_desktop(0)
-        active_apps = []
-        for i in range(desktop.get_child_count()):
-            app = desktop.get_child_at_index(i)
-            try:
-                for j in range(app.get_child_count()):
-                    frame = app.get_child_at_index(j)
-                    if (frame.get_role_name() == 'frame' and
-                            frame.get_state_set().contains(Atspi.StateType.ACTIVE)):
-                        active_apps.append((app.get_name(), frame.get_name()))
-            except Exception:
-                continue
-        # Never send browser shortcuts if the WPS editor is also ACTIVE.
-        # A false negative here is preferable to an accidental Ctrl+W.
-        if any(is_wps_presentation_application(app, title)
-               for app, title in active_apps):
-            return False
-        return any(is_browser_application(app) for app, _ in active_apps)
+        selected = _foreground_frame(Atspi.get_desktop(0), Atspi)
+        return bool(selected and is_browser_application(selected[0]))
     except Exception:
-        # Fail closed: leave the physical Home key unchanged if the desktop
-        # accessibility service is unavailable.
         return False
 
 
-def active_browser_window(desktop: Any, atspi: Any) -> tuple[str, str] | None:
-    """Return (MPRIS player prefix, active browser window title)."""
-    for i in range(desktop.get_child_count()):
-        app = desktop.get_child_at_index(i)
-        name = (app.get_name() or '').strip().casefold()
-        if name == 'google chrome':
-            browser = 'chromium'
-        elif name == 'firefox':
-            browser = 'firefox'
-        else:
-            continue
-        for j in range(app.get_child_count()):
-            frame = app.get_child_at_index(j)
-            try:
-                if frame.get_role_name() != 'frame':
-                    continue
-                if frame.get_state_set().contains(atspi.StateType.ACTIVE):
-                    return browser, (frame.get_name() or '').strip()
-            except Exception:
-                continue
-    return None
+def active_browser_window(desktop: Any = None, atspi: Any = None) -> tuple[str, str] | None:
+    """Prefer GNOME Shell focus; open AT-SPI only for legacy fallback."""
+    shell = _compositor_window()
+    if shell is not None:
+        browser = _shell_browser_kind(shell[0], shell[1])
+        return (browser, shell[2].strip()) if browser else None
+    if desktop is None or atspi is None:
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi
+            desktop, atspi = Atspi.get_desktop(0), Atspi
+        except Exception:
+            return None
+    selected = _foreground_frame(desktop, atspi)
+    if not selected:
+        return None
+    app, frame = selected
+    name = ' '.join(app.strip().casefold().split())
+    if name == 'google chrome':
+        browser = 'chromium'
+    elif name == 'firefox':
+        browser = 'firefox'
+    else:
+        return None
+    try:
+        return browser, (frame.get_name() or '').strip()
+    except Exception:
+        return None
 
 
 def is_firefox_pip_window(browser: str, window_title: str) -> bool:
@@ -149,12 +227,9 @@ def is_firefox_pip_window(browser: str, window_title: str) -> bool:
 
 
 def firefox_pip_focused() -> bool:
-    """Recognize the native Firefox PiP window, independent of video tab title."""
+    """Recognize PiP with compositor focus and lazy legacy fallback."""
     try:
-        import gi
-        gi.require_version('Atspi', '2.0')
-        from gi.repository import Atspi
-        active = active_browser_window(Atspi.get_desktop(0), Atspi)
+        active = active_browser_window()
         return active is not None and is_firefox_pip_window(*active)
     except Exception:
         return False
@@ -176,9 +251,9 @@ def active_browser_media_session() -> tuple[object, str] | None:
     """
     try:
         import gi
-        gi.require_version('Atspi', '2.0')
-        from gi.repository import Atspi, Gio, GLib
-        active = active_browser_window(Atspi.get_desktop(0), Atspi)
+        gi.require_version('Gio', '2.0')
+        from gi.repository import Gio, GLib
+        active = active_browser_window()
         if not active:
             return None
         browser, window_title = active
@@ -230,9 +305,7 @@ def browser_media_tab_focused() -> bool:
     # stronger and more universal positive signal.
     try:
         import gi
-        gi.require_version('Atspi','2.0')
-        from gi.repository import Atspi
-        active=active_browser_window(Atspi.get_desktop(0), Atspi)
+        active = active_browser_window()
         if not active:
             return False
         browser=active[0]
@@ -259,10 +332,7 @@ def youtube_video_tab_focused() -> bool:
     """
     try:
         import gi
-        gi.require_version('Atspi', '2.0')
-        from gi.repository import Atspi
-        desktop = Atspi.get_desktop(0)
-        active = active_browser_window(desktop, Atspi)
+        active = active_browser_window()
         if not active:
             return False
         browser, title = active
@@ -272,6 +342,11 @@ def youtube_video_tab_focused() -> bool:
         if not re.search(r'\s-\sYouTube(?:\s*[—-]\s*.+)?$', title, re.I):
             return False
 
+        # Only a confirmed YouTube video title needs the costly AT-SPI walk.
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+        desktop = Atspi.get_desktop(0)
         # The K shortcut should never type the letter 'k' into YouTube's
         # search box or a chat/comment field. Check accessibility focus.
         for i in range(desktop.get_child_count()):

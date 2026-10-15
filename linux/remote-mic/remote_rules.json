@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "wps-ok-enter",
+      "scope": "wps",
+      "input": "KEY_ENTER",
+      "tap": "KEY_F5"
+    },
+    {
+      "id": "wps-ok",
+      "scope": "wps",
+      "input": "KEY_OK",
+      "tap": "KEY_F5"
+    },
+    {
+      "id": "wps-back",
+      "scope": "wps",
+      "input": "KEY_BACK",
+      "tap": "KEY_ESC"
+    },
+    {
+      "id": "browser-back",
+      "scope": "browser",
+      "input": "KEY_BACK",
+      "shortcut": [
+        "KEY_LEFTALT",
+        "KEY_LEFT"
+      ],
+      "cooldown_ms": 450
+    },
+    {
+      "id": "browser-home",
+      "scope": "browser",
+      "input": "KEY_HOME",
+      "shortcut": [
+        "KEY_LEFTCTRL",
+        "KEY_T"
+      ],
+      "cooldown_ms": 500
+    },
+    {
+      "id": "browser-homepage",
+      "scope": "browser",
+      "input": "KEY_HOMEPAGE",
+      "shortcut": [
+        "KEY_LEFTCTRL",
+        "KEY_T"
+      ],
+      "cooldown_ms": 500
+    },
+    {
+      "id": "browser-www",
+      "scope": "browser",
+      "input": "KEY_WWW",
+      "shortcut": [
+        "KEY_LEFTCTRL",
+        "KEY_T"
+      ],
+      "cooldown_ms": 500
+    },
+    {
+      "id": "browser-menu",
+      "scope": "browser",
+      "input": "KEY_COMPOSE",
+      "shortcut": [
+        "KEY_LEFTCTRL",
+        "KEY_TAB"
+      ],
+      "cooldown_ms": 450
+    },
+    {
+      "id": "browser-tv",
+      "scope": "browser",
+      "input": "KEY_GRAVE",
+      "shortcut": [
+        "KEY_LEFTCTRL",
+        "KEY_W"
+      ],
+      "cooldown_ms": 800
+    },
+    {
+      "id": "chatgpt-back",
+      "scope": "chatgpt",
+      "input": "KEY_BACK",
+      "action": "new_chat",
+      "cooldown_ms": 950
+    },
+    {
+      "id": "chatgpt-send",
+      "scope": "chatgpt",
+      "input": "KEY_GRAVE",
+      "action": "send",
+      "cooldown_ms": 1100
+    }
+  ]
+}
