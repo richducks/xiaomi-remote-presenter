@@ -1,7 +1,7 @@
 import importlib.util
 import pathlib
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 P = pathlib.Path(__file__).resolve().parents[1] / "video_browser_context.py"
 spec = importlib.util.spec_from_file_location("video_browser_context", P)
@@ -106,7 +106,8 @@ class VideoBrowserContextTests(unittest.TestCase):
         gi=MagicMock()
         gi.repository.Atspi=atspi
         atspi.get_desktop.return_value=desktop
-        with patch.dict(sys.modules,{"gi":gi,"gi.repository":gi.repository}):
+        with patch.dict(sys.modules,{"gi":gi,"gi.repository":gi.repository}),\
+             patch.object(ctx,"_compositor_window",return_value=None):
             self.assertTrue(ctx.browser_window_focused())
             active.get_state_set.return_value.contains.return_value=False
             self.assertFalse(ctx.browser_window_focused())
@@ -209,10 +210,11 @@ class VideoBrowserContextTests(unittest.TestCase):
         desktop = MagicMock()
         desktop.get_child_count.return_value = 1
         desktop.get_child_at_index.return_value = app
-        self.assertEqual(ctx.active_browser_window(desktop, atspi),
-                         ("firefox", "Video - Firefox"))
-        frame.get_state_set.return_value.contains.return_value = False
-        self.assertIsNone(ctx.active_browser_window(desktop, atspi))
+        with patch.object(ctx,"_compositor_window",return_value=None):
+            self.assertEqual(ctx.active_browser_window(desktop, atspi),
+                             ("firefox", "Video - Firefox"))
+            frame.get_state_set.return_value.contains.return_value = False
+            self.assertIsNone(ctx.active_browser_window(desktop, atspi))
 
 
 if __name__ == "__main__":

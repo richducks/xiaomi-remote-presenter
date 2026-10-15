@@ -4,7 +4,7 @@ Turn a **Xiaomi Remote 2 Pro / Xiaomi Bluetooth Voice Remote** into a device-spe
 
 **[中文完整使用手册：按键表、Windows/macOS/Linux 安装、视频兼容与验收](docs/中文使用手册.md)**
 
-**新增 Linux Electron 图形配置客户端 v1.1.1：** [八个配置页面、安装、备份恢复与使用说明](docs/RC003-Electron-配置中心.md)。浏览器、ChatGPT、WPS、微信语音及系统按键可视化管理。Linux 需要现有 Python 后端，Windows/macOS 使用各自的原生实现。
+**新增 Linux Electron 图形配置客户端 v1.2.0：** [八个配置页面、安装、备份恢复与使用说明](docs/RC003-Electron-配置中心.md)。新增系统级（电源/音量/亮度）优先、应用级按焦点切换和独立语音的三层规则；提供 Brooks / Jobs 双重验收报告。Linux 需要现有 Python 后端，Windows/macOS 使用各自的原生实现。
 
 
 **Ubuntu / Firefox 连播恢复（2026-10-10）：** [诊断与恢复步骤](linux/remote-mic/README.md#2026-10-10firefox--夸克网盘连播与浏览器按键恢复记录) 包含 systemd 安全重启、浏览器快捷键检查，以及默认只读的 [Firefox 自动播放配置工具](linux/remote-mic/firefox-autoplay.py)。自动播放权限与网站的“下一集/连续播放”是两个不同的功能；浏览器全站点自动播放必须通过 `--apply` 自愿开启。

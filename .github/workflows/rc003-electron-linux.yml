@@ -2,7 +2,7 @@ name: RC003 Electron Linux Package
 on:
   push:
     tags:
-      - "v1.1.*"
+      - "v1.*"
   workflow_dispatch:
 permissions:
   contents: write
@@ -17,6 +17,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Python system/app key policy regression
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/python -m pip install -e linux/remote-mic
+          PYTHONPATH=linux/remote-mic .ci-venv/bin/python -m unittest discover -s linux/remote-mic/tests -p 'test_key_layers.py' -q
+          PYTHONPATH=linux/remote-mic .ci-venv/bin/python -m unittest discover -s linux/remote-mic/tests -p 'test_gatt_key_bridge.py' -q
+          PYTHONPATH=linux/remote-mic .ci-venv/bin/python -m unittest discover -s linux/remote-mic/tests -p 'test_chatgpt_navigation_rules.py' -q
       - name: Download official Electron runtime
         run: |
           curl --fail --location --retry 3 --retry-delay 3 --output "$GITHUB_WORKSPACE/electron.zip" "https://github.com/electron/electron/releases/download/v40.10.2/electron-v40.10.2-linux-x64.zip"
@@ -41,7 +48,7 @@ jobs:
           name: RC003 Electron Linux Preview
           body: |
             Xiaomi RC003 Electron visual profiles for Ubuntu Linux x64.
-            Eight configuration pages, BLE-HID fallback, WeChat fullscreen dictation improvements and volume reports.
+            Three layers: protected OS Power/Volume/Brightness, per-app Browser/ChatGPT/WPS, and independent BLE voice. Includes Brooks engineering and Jobs product reports.
             Linux Python/systemd runtime must be installed separately. Volume and WeChat fullscreen still need hardware validation.
             Documentation: docs/RC003-Electron-配置中心.md
           files: |

@@ -2,7 +2,18 @@
 const {app,BrowserWindow,ipcMain,dialog}=require("electron");
 const fs=require("node:fs"),path=require("node:path"),os=require("node:os");
 const {promisify}=require("node:util"),run=promisify(require("node:child_process").execFile);
-const root=process.env.XIAOMI_REMOTE_HOME||path.join(os.homedir(),"Documents/CodexProjects/xiaomi-remote-mic-linux");
+// Portable backend location. Explicit installer-provided env wins; otherwise
+// probe the standard per-user install and retain the legacy developer layout.
+const backendCandidates=[
+ process.env.XIAOMI_REMOTE_HOME,
+ path.join(os.homedir(),".local/share/xiaomi-remote-2pro/backend"),
+ path.join(os.homedir(),"Documents/CodexProjects/xiaomi-remote-mic-linux")
+].filter(Boolean);
+const root=process.env.XIAOMI_REMOTE_HOME
+ ? path.resolve(process.env.XIAOMI_REMOTE_HOME)
+ : backendCandidates.find(dir=>
+     fs.existsSync(path.join(dir,"remote_rules.py"))&&
+     fs.existsSync(path.join(dir,".venv/bin/python")))||backendCandidates[0];
 const {ConfigStore}=require("./config-store.cjs");
 const configStore=new ConfigStore(root);
 
@@ -32,7 +43,9 @@ async function state(){
  }));
  const bt=await exec("bluetoothctl",["devices","Connected"],7000);
  let count=null;try{count=JSON.parse(fs.readFileSync(rules,"utf8")).rules.length;}catch{}
- return {root,hid:inputMode().physical,proxy:inputMode().proxy,bt:/小米蓝牙语音遥控器|MI RC|Xiaomi Bluetooth Remote/i.test(bt.out),
+ return {root,backendReady:fs.existsSync(path.join(root,"remote_rules.py"))&&
+   fs.existsSync(path.join(root,".venv/bin/python")),
+  hid:inputMode().physical,proxy:inputMode().proxy,bt:/小米蓝牙语音遥控器|MI RC|Xiaomi Bluetooth Remote/i.test(bt.out),
   units:Object.fromEntries(rows),count,busy,time:new Date().toLocaleString("zh-CN")};
 }
 function readRules(){
@@ -106,8 +119,16 @@ async function exportRules(raw){
  fs.writeFileSync(dest.filePath,raw,{mode:0o600});
  return "规则已导出，可分享给其他用户（请自行确认内容）。";
 }
+async function defaultRules(){
+ const result=await exec(path.join(root,".venv/bin/python"),
+    [path.join(root,"remote_rules.py"),"--defaults"],10000);
+ if(!result.ok)throw Error("默认规则不可用："+result.out);
+ const parsed=JSON.parse(result.out);
+ if(parsed.version!==1||!Array.isArray(parsed.rules))throw Error("默认规则版本不正确");
+ return parsed;
+}
 const methods={
- state,readRules,saveRules,logs,restart,reconnect,
+ state,readRules,saveRules,logs,restart,reconnect,defaultRules,
  readVoice:()=>configStore.readVoice(),
  saveVoice:v=>configStore.saveVoice(v),
  schema:()=>JSON.parse(fs.readFileSync(path.join(__dirname,"ui-schema.json"),"utf8")),
@@ -122,5 +143,8 @@ function open(){
   preload:path.join(__dirname,"preload.cjs"),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}});
  win.loadFile(path.join(__dirname,"index.html"));
 }
+// Config UI uses no 3D/WebGL. Avoid unstable Wayland GPU subprocesses on
+// affected Ubuntu systems; this does not weaken Electron's process sandbox.
+app.disableHardwareAcceleration();
 app.whenReady().then(()=>{open();app.on("activate",()=>{if(BrowserWindow.getAllWindows().length===0)open();});});
 app.on("window-all-closed",()=>{if(process.platform!=="darwin")app.quit();});

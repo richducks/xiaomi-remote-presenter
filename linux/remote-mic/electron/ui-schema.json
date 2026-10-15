@@ -172,8 +172,69 @@
     "cooldown_ms": 500
   },
   "constraints": [
-    "系统音量键保留给操作系统，不允许覆盖。",
+    "系统电源、睡眠、音量与屏幕亮度键不得作为应用映射输入；硬件发送事件与否需实测。",
     "浏览器或 ChatGPT 的 Enter/OK 不允许设置成全局快捷键，避免误提交。",
     "微信语音按键由独立 BLE 服务控制，不属于普通按键映射。"
+  ],
+  "systemKeys": [
+    {
+      "code": "KEY_POWER",
+      "label": "电源键",
+      "hint": "交由 GNOME / systemd-logind 电源策略处理",
+      "symbol": "⏻"
+    },
+    {
+      "code": "KEY_SLEEP",
+      "label": "睡眠键",
+      "hint": "按系统睡眠策略处理（若设备有此键）",
+      "symbol": "☾"
+    },
+    {
+      "code": "KEY_VOLUMEUP",
+      "label": "音量增加",
+      "hint": "操作系统声音输出",
+      "symbol": "＋"
+    },
+    {
+      "code": "KEY_VOLUMEDOWN",
+      "label": "音量减少",
+      "hint": "操作系统声音输出",
+      "symbol": "－"
+    },
+    {
+      "code": "KEY_MUTE",
+      "label": "静音",
+      "hint": "操作系统声音静音（若设备支持）",
+      "symbol": "◌"
+    },
+    {
+      "code": "KEY_BRIGHTNESSUP",
+      "label": "屏幕亮度增加",
+      "hint": "交由桌面亮度控制（若设备支持）",
+      "symbol": "☀"
+    },
+    {
+      "code": "KEY_BRIGHTNESSDOWN",
+      "label": "屏幕亮度减少",
+      "hint": "交由桌面亮度控制（若设备支持）",
+      "symbol": "☼"
+    }
+  ],
+  "layers": [
+    {
+      "id": "system",
+      "title": "系统级",
+      "summary": "始终优先，由 Linux 处理，任何应用不得覆盖"
+    },
+    {
+      "id": "application",
+      "title": "应用级",
+      "summary": "依前台窗口选择浏览器、ChatGPT 或 WPS 对应规则"
+    },
+    {
+      "id": "voice",
+      "title": "独立语音通道",
+      "summary": "专用蓝牙麦克风服务，不通过普通键盘映射"
+    }
   ]
 }

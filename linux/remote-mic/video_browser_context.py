@@ -158,8 +158,10 @@ def _shell_wps_presentation(app_id: str, wm_class: str, title: str) -> bool:
 def wps_presentation_focused() -> bool:
     """Only map WPS when the compositor confirms the slide editor."""
     shell = _compositor_window()
-    if shell is not None:
+    if isinstance(shell, tuple) and len(shell) == 3:
         return _shell_wps_presentation(*shell)
+    if shell:
+        return False
     try:
         import gi
         gi.require_version('Atspi', '2.0')
@@ -176,7 +178,8 @@ def browser_window_focused() -> bool:
     """Map browser shortcuts only when the actual foreground is a browser."""
     shell = _compositor_window()
     if shell is not None:
-        return _shell_browser_kind(shell[0], shell[1]) is not None
+        return bool(isinstance(shell, tuple) and len(shell) == 3 and
+                    _shell_browser_kind(shell[0], shell[1]) is not None)
     try:
         import gi
         gi.require_version('Atspi', '2.0')
@@ -190,9 +193,11 @@ def browser_window_focused() -> bool:
 def active_browser_window(desktop: Any = None, atspi: Any = None) -> tuple[str, str] | None:
     """Prefer GNOME Shell focus; open AT-SPI only for legacy fallback."""
     shell = _compositor_window()
-    if shell is not None:
+    if isinstance(shell, tuple) and len(shell) == 3:
         browser = _shell_browser_kind(shell[0], shell[1])
         return (browser, shell[2].strip()) if browser else None
+    if shell:
+        return None
     if desktop is None or atspi is None:
         try:
             import gi

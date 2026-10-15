@@ -12,14 +12,15 @@ import os
 from pathlib import Path
 import time
 from evdev import ecodes
+from key_layers import APP_SCOPES, SYSTEM_KEY_NAMES
 
 LOG = logging.getLogger("xiaomi-remote-rules")
 DEFAULT_PATH = Path(__file__).with_name("remote_rules.json")
-INPUTS = frozenset("KEY_ENTER KEY_OK KEY_BACK KEY_HOME KEY_HOMEPAGE KEY_WWW KEY_COMPOSE KEY_GRAVE KEY_UP KEY_DOWN KEY_PLAYPAUSE KEY_VOLUMEUP KEY_VOLUMEDOWN".split())
-RESERVED_SYSTEM_INPUTS = frozenset({"KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE"})
+INPUTS = frozenset("KEY_ENTER KEY_OK KEY_BACK KEY_HOME KEY_HOMEPAGE KEY_WWW KEY_COMPOSE KEY_GRAVE KEY_UP KEY_DOWN KEY_PLAYPAUSE KEY_VOLUMEUP KEY_VOLUMEDOWN KEY_MUTE KEY_POWER KEY_SLEEP KEY_BRIGHTNESSUP KEY_BRIGHTNESSDOWN".split())
+RESERVED_SYSTEM_INPUTS = SYSTEM_KEY_NAMES
 OUTPUTS = frozenset("KEY_F5 KEY_ESC KEY_LEFT KEY_RIGHT KEY_UP KEY_DOWN KEY_T KEY_W KEY_TAB KEY_D KEY_A KEY_K KEY_SPACE KEY_ENTER KEY_BACKSPACE KEY_PAGEUP KEY_PAGEDOWN KEY_HOME KEY_END".split())
 MODIFIERS = frozenset("KEY_LEFTCTRL KEY_LEFTALT KEY_LEFTSHIFT".split())
-SCOPES = frozenset(("wps", "browser", "chatgpt"))
+SCOPES = frozenset(APP_SCOPES)
 CHATGPT_ACTIONS = frozenset(("new_chat", "voice_toggle", "send"))
 MAX_SIZE = 65536
 # A missing file must preserve the known-working physical remote behavior.
@@ -77,7 +78,7 @@ def validate(config: object) -> dict[int, tuple[Rule, ...]]:
             raise ValueError("scope must be wps, browser or chatgpt")
         input_code = _code(item["input"], INPUTS)
         if isinstance(item["input"], str) and item["input"] in RESERVED_SYSTEM_INPUTS:
-            raise ValueError("system volume keys cannot be remapped by application rules")
+            raise ValueError("system-level power, volume and brightness keys cannot be remapped by application rules")
         if scope != "wps" and input_code in (ecodes.KEY_ENTER, ecodes.KEY_OK):
             raise ValueError("browser Enter/OK would break video and text input")
         if (scope, input_code) in seen:
@@ -169,6 +170,13 @@ def check(path: Path) -> int:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Check scoped Xiaomi remote rules")
-    parser.add_argument("--check", type=Path, default=DEFAULT_PATH)
+    parser.add_argument("--check", type=Path, default=None)
+    parser.add_argument("--defaults", action="store_true",
+                        help="Emit the single source of default rules as JSON")
     args = parser.parse_args()
-    raise SystemExit(check(args.check))
+    if args.defaults:
+        if args.check is not None:
+            parser.error("--defaults cannot be combined with --check")
+        print(json.dumps({"version": 1, "rules": DEFAULT_RULES}, ensure_ascii=False))
+    else:
+        raise SystemExit(check(args.check or DEFAULT_PATH))

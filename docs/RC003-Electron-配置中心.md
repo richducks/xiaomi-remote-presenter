@@ -1,6 +1,6 @@
 # 小米遥控器 2 Pro · Electron 配置客户端
 
-适用设备：小米 RC003，VID 2717 / PID 32B8。当前版本是 Linux x64 v1.1.1。Windows/macOS 的原生按键后端见仓库对应目录；Linux deb 不可用于 Windows/macOS。
+适用设备：小米 RC003，VID 2717 / PID 32B8。当前版本是 Linux x64 v1.2.0。Windows/macOS 的原生按键后端见仓库对应目录；Linux deb 不可用于 Windows/macOS。
 
 ## 小白操作
 
@@ -13,7 +13,7 @@
 
 在 Ubuntu GNOME 系统上从本目录运行 bash install.sh 部署 Python BLE 后端，运行 bash install-services.sh --enable-video 配置服务。
 当 BlueZ 连接遥控器但没有对应 HID 设备时，运行 bash install-gatt-fallback.sh。兼容桥会检测原生 HID 并让位。
-从 GitHub Releases 获取版本匹配的 xiaomi-remote-control_1.1.1_amd64.deb，确认来源后通过 Ubuntu 包管理器安装，随后运行 bash electron/install-linux-desktop.sh 设置本地后台目录。
+从 GitHub Releases 获取版本匹配的 xiaomi-remote-control_1.2.0_amd64.deb，确认来源后通过 Ubuntu 包管理器安装，随后运行 bash electron/install-linux-desktop.sh 设置本地后台目录。
 开发者可直接使用 bash electron/build-deb.sh 构建本机发行包；已配置操作系统授权的开发机可运行 bash electron/build-and-upgrade.sh 来打包、校验、安装。
 本程序依赖 Python/systemd 后端；单装 Electron 不能代替蓝牙和音频驱动。
 
@@ -22,3 +22,14 @@
 配置、聊天和语音都在本机处理。请勿公开个人音频、聊天、系统日志、MAC 地址、机密令牌或配置备份。
 软件禁用 Node 渲染层权限，启用 Electron sandbox 和 contextIsolation；所有危险操作严格使用 IPC 白名单与 Linux 操作系统权限机制。
 公开发行版不自动 root 执行未知下载程序。
+
+
+## 1.2.0 分层规则
+
+1. 系统级：电源、睡眠、音量增减、静音、亮度增减不受前台应用影响，不可作为自定义应用键。
+   程序只把 HID 真实事件透传给 Linux，不提供主动关机命令。
+2. 应用级：Home/OK/返回/菜单/方向/TV 按当前前台浏览器、ChatGPT、WPS 配置，各应用彼此独立。
+3. 独立语音：微信语音属于 BLE 音频/语音输入，不等同于普通键盘事件。
+4. 没有匹配应用规则的其他事件默认透传，保留原键行为。
+
+详见 [Brooks 工程验收](../../docs/RC003-v1.2.0-Brooks工程验收.md)、[Jobs 产品验收](../../docs/RC003-v1.2.0-Jobs产品验收.md) 和 [最终核验清单](../../docs/RC003-v1.2.0-最终验收清单.md)。

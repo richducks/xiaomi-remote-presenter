@@ -3,26 +3,17 @@
 const $=id=>document.getElementById(id);
 const pages={overview:"设备概览",browser:"浏览器",chatgpt:"ChatGPT",wps:"WPS 演示",wechat:"微信语音",system:"系统按键",backup:"方案与备份",diagnostics:"诊断与维护"};
 const scopeLabels={wps:"WPS",browser:"浏览器",chatgpt:"ChatGPT"};
-const DEFAULT_RULES=[
-{id:"wps-ok-enter",scope:"wps",input:"KEY_ENTER",tap:"KEY_F5"},
-{id:"wps-ok",scope:"wps",input:"KEY_OK",tap:"KEY_F5"},
-{id:"wps-back",scope:"wps",input:"KEY_BACK",tap:"KEY_ESC"},
-{id:"browser-back",scope:"browser",input:"KEY_BACK",shortcut:["KEY_LEFTALT","KEY_LEFT"],cooldown_ms:450},
-{id:"browser-home",scope:"browser",input:"KEY_HOME",shortcut:["KEY_LEFTCTRL","KEY_T"],cooldown_ms:500},
-{id:"browser-homepage",scope:"browser",input:"KEY_HOMEPAGE",shortcut:["KEY_LEFTCTRL","KEY_T"],cooldown_ms:500},
-{id:"browser-www",scope:"browser",input:"KEY_WWW",shortcut:["KEY_LEFTCTRL","KEY_T"],cooldown_ms:500},
-{id:"browser-menu",scope:"browser",input:"KEY_COMPOSE",shortcut:["KEY_LEFTCTRL","KEY_TAB"],cooldown_ms:450},
-{id:"browser-tv",scope:"browser",input:"KEY_GRAVE",shortcut:["KEY_LEFTCTRL","KEY_W"],cooldown_ms:800},
-{id:"chatgpt-back",scope:"chatgpt",input:"KEY_BACK",action:"new_chat",cooldown_ms:950},
-{id:"chatgpt-send",scope:"chatgpt",input:"KEY_GRAVE",action:"send",cooldown_ms:1100}
-];
 let draft=null,schema=null,voice=null,editing=null,dirty=false,reading=false,toastTimer;
 function node(tag,label,clazz){const e=document.createElement(tag);if(label!==undefined)e.textContent=label;if(clazz)e.className=clazz;return e;}
 function notify(message){
  const e=$("toast");e.textContent=String(message);e.classList.add("show");
  clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.classList.remove("show"),9000);
 }
-function setDirty(value){dirty=!!value;$("saveAll").textContent=dirty?"保存更改 •":"保存配置";}
+function setDirty(value){
+ dirty=!!value;
+ $("saveAll").hidden=!dirty;
+ $("saveAll").textContent=dirty?"保存更改 •":"保存配置";
+}
 function label(section,key){
  const item=schema[section].find(e=>e[0]===key);return item?item[1]:String(key).replace(/^KEY_/,"");
 }
@@ -37,6 +28,19 @@ function navigate(key){
  document.querySelectorAll(".page").forEach(e=>e.classList.toggle("active",e.id==="page-"+key));
  document.querySelectorAll(".nav").forEach(e=>e.classList.toggle("active",e.dataset.page===key));
  $("crumb-current").textContent=pages[key];
+ $("mobile-page").value=key;
+}
+function renderSystemKeys(){
+ const panel=$("system-key-list");panel.replaceChildren();
+ for(const item of schema.systemKeys){
+  const row=node("div",undefined,"system-key");
+  const sym=node("span",item.symbol,"key-symbol");
+  const detail=node("div");
+  detail.append(node("strong",item.label));
+  detail.append(node("small",item.hint+" · "+item.code));
+  const status=node("span","不可改写 · 待硬件验收","status-chip");
+  row.append(sym,detail,status);panel.append(row);
+ }
 }
 function renderRules(){
  if(!schema||!draft)return;
@@ -70,7 +74,7 @@ function editRule(scope,id){
  const old=id?draft.rules.find(r=>r.id===id):null;editing={scope,id};
  $("editor-title").textContent=id?"修改按键规则":"新增按键规则";
  $("editor-description").textContent=scopeLabels[scope]+" · 仅在此应用中执行";
- const blocked=new Set(["KEY_MUTE","KEY_VOLUMEUP","KEY_VOLUMEDOWN"]);
+ const blocked=new Set(schema.systemKeys.map(key=>key.code));
  if(scope!=="wps"){blocked.add("KEY_ENTER");blocked.add("KEY_OK");}
  fillChoices($("rule-input"),schema.inputs.filter(x=>!blocked.has(x[0])),old?.input);
  const choices=scope==="chatgpt"?schema.actions.map(x=>["action:"+x[0],x[1]]):
@@ -137,10 +141,14 @@ function setStatus(s){
  const working=Object.values(s.units).filter(v=>v.active).length;
  $("metric-services").textContent=working+"/"+Object.keys(s.units).length;
  $("root").textContent=s.root;
- const okay=s.bt&&(s.hid||s.proxy)&&working===Object.keys(s.units).length;
+ const okay=Boolean(s.backendReady&&s.bt&&(s.hid||s.proxy)&&
+                    working===Object.keys(s.units).length);
  $("connection-dot").className="dot "+(okay?"ok":"bad");
- $("connection-summary").textContent=okay?"设备运行正常":"部分功能需检查";
- $("overview-note").textContent=okay?"所有后台服务正在运行。保存规则后，原按键服务自动热加载配置。":"请进入诊断页面查看具体服务状态。";
+ $("connection-summary").textContent=!s.backendReady?"等待安装后端":okay?"设备运行正常":"部分功能需检查";
+ $("overview-note").textContent=!s.backendReady?
+  "还没有安装 Linux Python 后端。请按 GitHub 文档部署蓝牙/语音服务，然后重新打开控制中心。仅安装 Electron 界面不能识别遥控器。":
+  okay?"所有后台服务正在运行。保存规则后，原按键服务自动热加载配置。":
+  "设备或服务未就绪，请进入诊断页面查看具体状态。";
  const target=$("services-detail");target.replaceChildren();
  const labels={mic:"蓝牙语音",gatt:"BLE GATT 按键兼容桥",bridge:"微信 / ChatGPT 桥接",video:"应用按键映射引擎"};
  for(const [key,item] of Object.entries(s.units)){
@@ -161,13 +169,20 @@ function bind(id,fn,msg=null){
  $(id).addEventListener("click",async()=>{
   if(msg&&!confirm(msg))return;
   $(id).disabled=true;
+  const original=$(id).textContent;
+  $(id).textContent="处理中…";
   try{const result=await fn();if(result!==undefined&&result!==null)notify(result);}
   catch(e){notify("操作失败："+e.message);}
-  finally{$(id).disabled=false;}
+  finally{
+   $(id).disabled=false;
+   $(id).textContent=(id==="saveAll"&&!dirty)?"保存配置":original;
+  }
  });
 }
 window.addEventListener("DOMContentLoaded",async()=>{
  document.querySelectorAll(".nav").forEach(n=>n.onclick=()=>navigate(n.dataset.page));
+ $("mobile-page").onchange=()=>navigate($("mobile-page").value);
+ navigate("overview");  // never show two active nav entries on first load
  document.querySelectorAll("[data-goto]").forEach(n=>n.onclick=()=>navigate(n.dataset.goto));
  document.querySelectorAll(".add-rule").forEach(n=>n.onclick=()=>editRule(n.dataset.scope,null));
  $("rule-action").onchange=onActionChanged;
@@ -185,8 +200,8 @@ window.addEventListener("DOMContentLoaded",async()=>{
  });
  bind("export",()=>window.remote.exportRules(JSON.stringify(draft,null,2)));
  bind("restoreDefaults",async()=>{
-  if(!confirm("确定预览默认 11 条规则？当前未保存的修改会被放弃。"))return null;
-  draft={version:1,rules:structuredClone(DEFAULT_RULES)};
+  if(!confirm("预览当前程序的默认规则？未保存的修改将放弃。"))return null;
+  draft=await window.remote.defaultRules();
   setDirty(true);renderRules();return "默认配置已载入预览，尚未写入电脑。";
  });
  bind("applyRaw",async()=>{
@@ -198,11 +213,17 @@ window.addEventListener("DOMContentLoaded",async()=>{
  window.addEventListener("beforeunload",event=>{if(dirty){event.preventDefault();event.returnValue="";}});
  try{
   schema=await window.remote.schema();
+  renderSystemKeys();
   voice=await window.remote.readVoice();
   $("voice-enabled").checked=voice.enabled;
   $("voice-focus").checked=voice.auto_focus_composer;
   $("voice-delay").value=voice.preview_settle_ms;
-  await loadRules();await refresh();await showBackups();
- }catch(e){notify("界面初始化失败："+e.message);}
+  try{await loadRules();}
+  catch(e){
+   notify("按键后端未就绪，请到“诊断与维护”检查："+e.message);
+   draft={version:1,rules:[]};renderRules();
+  }
+  await refresh();await showBackups();
+ }catch(e){notify("界面初始化异常："+e.message);}
  setInterval(refresh,9000);
 });

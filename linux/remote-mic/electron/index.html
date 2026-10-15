@@ -4,23 +4,41 @@
 <title>小米遥控器 2 Pro · 控制中心</title><link rel="stylesheet" href="style.css"></head>
 <body><div class="app-shell">
 <aside class="sidebar"><div class="brand"><div class="logo">MI<span>•</span></div><div><strong>遥控器 2 Pro</strong><small>控制中心 / RC003</small></div></div>
-<div class="nav-group">开始使用</div><nav aria-label="应用配置导航">
+<nav aria-label="按键层级与应用配置">
+<div class="nav-group">首页</div>
 <button class="nav active" data-page="overview"><span class="nav-icon">⌂</span>设备概览</button>
+<div class="nav-group nested">① 系统级 · 全局生效</div>
+<button class="nav" data-page="system"><span class="nav-icon">⚙</span>电源与系统音量</button>
+<div class="nav-group nested">② 应用级 · 随窗口切换</div>
 <button class="nav" data-page="browser"><span class="nav-icon">◎</span>浏览器</button>
 <button class="nav" data-page="chatgpt"><span class="nav-icon">◈</span>ChatGPT</button>
 <button class="nav" data-page="wps"><span class="nav-icon">▣</span>WPS 演示</button>
-<div class="nav-group nested">进阶功能</div>
+<div class="nav-group nested">③ 独立通道 · 语音输入</div>
 <button class="nav" data-page="wechat"><span class="nav-icon">♬</span>微信语音</button>
-<button class="nav" data-page="system"><span class="nav-icon">☷</span>系统按键</button>
+<div class="nav-group nested">维护</div>
 <button class="nav" data-page="backup"><span class="nav-icon">↶</span>方案与备份</button>
-<button class="nav" data-page="diagnostics"><span class="nav-icon">⚙</span>诊断与维护</button>
-</nav><div class="sidebar-foot"><span id="connection-dot" class="dot"></span><span id="connection-summary">正在连接设备</span><small>本地管理 · 不上传语音内容</small></div></aside>
-<div class="workspace"><header class="topbar"><div class="crumb">设备设置 <span>/</span> <span id="crumb-current">概览</span></div><div class="header-actions"><span id="header-time">检测中</span><button class="btn" id="refresh">刷新状态</button><button class="btn btn-primary" id="saveAll">保存配置</button></div></header>
+<button class="nav" data-page="diagnostics"><span class="nav-icon">☷</span>诊断与维护</button>
+</nav>
+<label class="mobile-picker-wrap" for="mobile-page"><span>选择配置层级与页面</span>
+<select id="mobile-page" aria-label="选择配置页面">
+<optgroup label="首页"><option value="overview">设备概览</option></optgroup>
+<optgroup label="① 系统级 · 始终生效"><option value="system">电源与系统音量</option></optgroup>
+<optgroup label="② 应用级 · 前台窗口"><option value="browser">浏览器</option><option value="chatgpt">ChatGPT</option><option value="wps">WPS 演示</option></optgroup>
+<optgroup label="③ 独立语音通道"><option value="wechat">微信语音</option></optgroup>
+<optgroup label="维护"><option value="backup">方案与备份</option><option value="diagnostics">诊断与维护</option></optgroup>
+</select></label><div class="sidebar-foot"><span id="connection-dot" class="dot"></span><span id="connection-summary">正在连接设备</span><small>本地管理 · 不上传语音内容</small></div></aside>
+<div class="workspace"><header class="topbar"><div class="crumb">按键分层 <span>/</span> <span id="crumb-current">概览</span></div><div class="header-actions"><span id="header-time">检测中</span><button class="btn" id="refresh">刷新状态</button><button class="btn btn-primary" id="saveAll" hidden>保存更改</button></div></header>
 <main>
-<section id="page-overview" class="page active"><div class="hero"><div class="hero-copy"><div class="overline">XIAOMI REMOTE CONTROL</div><h1>让一个遥控器，控制所有工作场景。</h1><p>一套配置适配浏览器、微信、ChatGPT 和 WPS。不写代码，也能调整快捷键。</p><button class="btn btn-light" data-goto="browser">开始自定义按键 →</button></div><div class="hero-remote" aria-hidden="true"><div class="remote-body"><div class="remote-top">●</div><div class="remote-ring"><div>▲</div><div><span>◀</span><b>OK</b><span>▶</span></div><div>▼</div></div><div class="remote-buttons">⌂ &nbsp; ↶ &nbsp; ☰<br><br>＋ &nbsp; 🎤 &nbsp; －</div></div></div></div>
+<section id="page-overview" class="page active"><div class="hero"><div class="hero-copy"><div class="overline">三层运行规则 · 优先级固定</div><h1>按键分层管理，应用自动切换。</h1><p>电源、音量由系统接管；其他按键只在对应应用生效；语音走独立通道。</p><button class="btn btn-light" data-goto="browser">配置应用快捷键 →</button></div><div class="hero-remote" aria-hidden="true"><div class="remote-body"><div class="remote-top">●</div><div class="remote-ring"><div>▲</div><div><span>◀</span><b>OK</b><span>▶</span></div><div>▼</div></div><div class="remote-buttons">⌂ &nbsp; ↶ &nbsp; ☰<br><br>＋ &nbsp; 🎤 &nbsp; －</div></div></div></div>
+<div class="first-steps" role="note"><strong>第一次使用？</strong><span>① 先看蓝牙状态</span><span>② 选左侧应用</span><span>③ 修改按键并保存</span></div>
+<section class="layer-overview" aria-label="按键运行层级">
+<button type="button" class="layer-card layer-system" data-goto="system"><span class="layer-rank">01 · 系统优先</span><strong>电源 / 音量 / 亮度</strong><small>交给 Linux · 不受前台软件影响 · 禁止重映射</small><span class="layer-link">了解保护机制 →</span></button>
+<button type="button" class="layer-card layer-application" data-goto="browser"><span class="layer-rank">02 · 应用规则</span><strong>Home / OK / 返回 / 方向</strong><small>浏览器、ChatGPT、WPS 采用不同动作</small><span class="layer-link">选择应用设置 →</span></button>
+<button type="button" class="layer-card layer-voice" data-goto="wechat"><span class="layer-rank">03 · 独立通道</span><strong>语音按键</strong><small>BLE 麦克风 · 不与键盘快捷键混用</small><span class="layer-link">微信语音设置 →</span></button>
+</section>
 <h2 class="section-title">运行状态 <small>来自当前电脑</small></h2>
 <div class="metric-grid"><article class="metric"><span>蓝牙连接</span><strong id="metric-bluetooth">检测中</strong><small>RC003 BLE</small></article><article class="metric"><span>按键设备</span><strong id="metric-hid">检测中</strong><small>原生 HID / GATT 桥接</small></article><article class="metric"><span>启用的映射</span><strong id="metric-rules">—</strong><small>随应用自动切换</small></article><article class="metric"><span>后台服务</span><strong id="metric-services">—</strong><small>语音、桥接、网页</small></article></div>
-<div class="card-grid"><article class="quick-card" data-goto="browser"><span>◎</span><strong>浏览器控制</strong><small>标签切换 · 新建网页 · 视频</small><b>配置 →</b></article><article class="quick-card" data-goto="wps"><span>▣</span><strong>演示遥控</strong><small>一键放映 · 退出 · 翻页</small><b>配置 →</b></article><article class="quick-card" data-goto="chatgpt"><span>◈</span><strong>ChatGPT 网页</strong><small>新建对话 · 确认提交</small><b>配置 →</b></article><article class="quick-card" data-goto="wechat"><span>♬</span><strong>微信语音</strong><small>按住说话 · 松开预览</small><b>配置 →</b></article></div>
+
 <div class="info-strip" id="overview-note">点击左侧任意应用，即可调整该应用自己的按键规则，不影响其他程序。</div></section>
 <section id="page-browser" class="page"><div class="page-head"><div><span class="eyebrow">APP PROFILE / 01</span><h1>浏览器</h1><p>只在浏览器窗口获得焦点时执行。适用于 Firefox、Chrome 等主流浏览器。</p></div><div class="pill">独立应用规则</div></div><div class="card"><div class="card-header"><div><h2>按键动作</h2><p>点按一行即可编辑。新增规则不需要写 JSON。</p></div><button class="btn btn-secondary add-rule" data-scope="browser">＋ 添加按键</button></div><div class="rules-table" id="rules-browser"></div></div></section>
 <section id="page-chatgpt" class="page"><div class="page-head"><div><span class="eyebrow">APP PROFILE / 02</span><h1>ChatGPT</h1><p>对话控制与浏览器快捷键分开管理，防止误提交。</p></div><div class="pill">网页专属操作</div></div><div class="info-strip">发送消息需由网页脚本确认；网页中普通 Enter/OK 不允许自定义映射，以保护手动输入。</div><div class="card"><div class="card-header"><div><h2>对话按键</h2><p>支持新建聊天、语音开关和发送已确认消息。</p></div><button class="btn btn-secondary add-rule" data-scope="chatgpt">＋ 添加按键</button></div><div class="rules-table" id="rules-chatgpt"></div></div></section>
@@ -31,7 +49,11 @@
 <label class="setting-row"><span><strong>自动定位聊天输入框</strong><small>适配最大化和全屏；只有识别到微信聊天编辑框才执行</small></span><input type="checkbox" id="voice-focus"></label>
 <label class="setting-row"><span><strong>语音结束后的文字稳定时间</strong><small>松开后保留转写结果，不重复粘贴、不自动发送</small></span><span class="input-unit"><input id="voice-delay" type="number" min="200" max="1800" step="50"><span>毫秒</span></span></label>
 <div class="actions"><button class="btn btn-primary" id="saveVoice">保存微信设置</button></div></div><div class="info-strip">微信语音键来自 BLE 音频事件，不允许绑定到浏览器快捷键。系统必须能够确定当前窗口为微信。</div></section>
-<section id="page-system" class="page"><div class="page-head"><div><span class="eyebrow">DEVICE CONTROLS</span><h1>系统按键</h1><p>保留操作系统音量控制，防止网页插件抢占硬件音量。</p></div><div class="pill">安全保护</div></div><div class="card"><div class="system-key"><span class="key-symbol">＋</span><div><strong>音量增加</strong><small>Linux KEY_VOLUMEUP · PipeWire 系统音量</small></div><span class="status-chip">系统保留</span></div><div class="system-key"><span class="key-symbol">－</span><div><strong>音量减少</strong><small>Linux KEY_VOLUMEDOWN · PipeWire 系统音量</small></div><span class="status-chip">系统保留</span></div><div class="system-key"><span class="key-symbol">◌</span><div><strong>静音</strong><small>Linux KEY_MUTE（设备支持时）</small></div><span class="status-chip">系统保留</span></div></div><div class="info-strip">音量键不允许覆盖为应用快捷键。若音量键没有效果，请进入“诊断与维护”查看 BLE Consumer 报告是否出现。</div></section>
+<section id="page-system" class="page"><div class="page-head"><div><span class="eyebrow">LAYER 01 · SYSTEM</span><h1>电源与系统按键</h1><p>这组键优先交给 Linux 操作系统；浏览器、微信、WPS、ChatGPT 均无权覆盖。</p></div><div class="pill">系统级 · 禁止改写</div></div>
+<div class="info-strip"><strong>作用优先级：</strong>系统键直通 → 语音由独立 BLE 服务处理 → 其他键按前台应用匹配 → 无匹配时保留原始按键。<br>电源键触发的是 Linux 既有电源策略，不是软件直接执行关机命令；是否能收到电源事件，取决于遥控器型号与 HID 固件。</div>
+<div class="card"><div class="card-header"><div><h2>系统保留按键</h2><p>“系统保留”表示软件不会改写此键，<strong>不代表硬件已经实测通过</strong>。</p></div><span class="status-chip">不可在应用层选择</span></div>
+<div id="system-key-list" class="system-key-list"></div></div>
+<div class="card"><h2>为什么不能编辑？</h2><p>系统键的优先级高于所有应用。修改为浏览器快捷键会导致音量在微信、WPS、视频和桌面之间行为不一致，电源键误触还可能造成未保存数据丢失。</p><div class="actions"><button type="button" class="btn btn-secondary" data-goto="diagnostics">检查系统事件与日志 →</button></div></div></section>
 <section id="page-backup" class="page"><div class="page-head"><div><span class="eyebrow">PROFILE LIBRARY</span><h1>方案与备份</h1><p>分享按键方案给朋友，或者一键恢复到以前的配置。</p></div></div>
 <div class="card"><h2>配置方案</h2><p>导入前会校验，保存前自动备份，不会直接覆盖正在运行的映射。</p><div class="actions"><button id="import" class="btn btn-secondary">导入 JSON 方案</button><button id="export" class="btn btn-secondary">导出当前方案</button><button id="restoreDefaults" class="btn">恢复出厂方案预览</button></div></div>
 <div class="card"><div class="card-header"><div><h2>本地历史备份</h2><p>恢复操作会再备份一次当前规则。</p></div><button class="btn" id="refreshBackups">刷新列表</button></div><div id="backups" class="backup-list">载入中…</div></div>

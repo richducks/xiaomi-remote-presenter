@@ -92,6 +92,19 @@ class ChatGPTNavigationRules(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(back[2].key_code, ecodes.KEY_LEFT)
         self.assertEqual(rules.validate({'version': 1, 'rules': rules.DEFAULT_RULES}), loaded)
 
+    async def test_system_layer_events_never_consult_application_focus(self):
+        for profile in (dict(chatgpt=True),dict(browser=True),dict(wps=True)):
+            keys=[]
+            for code in (ecodes.KEY_POWER,ecodes.KEY_SLEEP,
+                         ecodes.KEY_VOLUMEUP,ecodes.KEY_VOLUMEDOWN,
+                         ecodes.KEY_MUTE,ecodes.KEY_BRIGHTNESSUP,
+                         ecodes.KEY_BRIGHTNESSDOWN):
+                keys += [(code,1),(code,2),(code,0)]
+            ui, actions=await self.run_keys(keys,**profile)
+            self.assertEqual(ui.writes,[])
+            self.assertEqual(ui.forwarded,[(ecodes.EV_KEY,key,value) for key,value in keys])
+            self.assertEqual(actions,[])
+
     async def test_home_in_chatgpt_opens_exactly_one_tab(self):
         for home in (ecodes.KEY_HOME, ecodes.KEY_HOMEPAGE, ecodes.KEY_WWW):
             with self.subTest(home=home):

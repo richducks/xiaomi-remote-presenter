@@ -19,6 +19,7 @@ from time import sleep as key_sleep
 from evdev import InputDevice, UInput, ecodes, list_devices
 
 from remote_rules import RuleBook
+from key_layers import SYSTEM_KEY_CODES, is_system_key
 from wps_focus_recovery import (
     WPS_RESUME_SECONDS, ensure_wps_editor_focus, safe_to_resume_wps,
 )
@@ -39,11 +40,10 @@ VIRTUAL_NAME = "Xiaomi Remote Video Only"
 # Never grab another remapper's virtual output.
 VIRTUAL_DEVICE_NAMES = {VIRTUAL_NAME, "Xiaomi Remote 2 Pro Filtered"}
 SPEED_KEYS = {ecodes.KEY_UP: ecodes.KEY_D, ecodes.KEY_DOWN: ecodes.KEY_A}
-# RC003 volume buttons remain GNOME / PipeWire system media keys; they
-# must never be taken over by browser-video or ChatGPT shortcuts. Forward
-# the physical down / auto-repeat / release sequence without synthesizing taps.
-SYSTEM_VOLUME_KEYS = frozenset({ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN,
-                                ecodes.KEY_MUTE})
+# System power, volume, brightness and sleep keys have higher authority than
+# all applications. Preserve the physical down/repeat/up sequence; never
+# synthesize OS shutdown or volume changes in the application remapper.
+SYSTEM_VOLUME_KEYS = SYSTEM_KEY_CODES  # retained alias for prior regression tests
 OK_KEYS = {ecodes.KEY_ENTER, ecodes.KEY_OK}
 BACK_KEYS = {ecodes.KEY_BACK}
 BLOCK_PHYSICAL_F5 = ecodes.KEY_F5  # Prevent RC003 microphone-key browser refresh.
@@ -73,9 +73,13 @@ WECHAT_DRAFT_READY = "http://127.0.0.1:18766/wechat/draft-ready"
 WECHAT_SEND = "http://127.0.0.1:18766/wechat/send"
 
 
-def chatgpt_window_focused() -> bool:
-    """Require compositor-confirmed browser AND live foreground JS tab."""
-    if not browser_window_focused():
+def chatgpt_window_focused(*, browser_already_confirmed: bool = False) -> bool:
+    """Require compositor-confirmed browser AND live foreground JS tab.
+
+    The event loop caches browser focus for a single physical key event.
+    Rechecking it mid-routing can change the branch while focus is switching.
+    """
+    if not browser_already_confirmed and not browser_window_focused():
         return False
     try:
         with urllib.request.urlopen(CHATGPT_ACTIVE, timeout=0.22) as reply:
@@ -242,9 +246,9 @@ async def forward_device(device: InputDevice) -> None:
             if code == BLOCK_PHYSICAL_F5:
                 continue
 
-            # Media volume belongs to Ubuntu even when a video, WPS or
-            # ChatGPT window is focused. Do not run app rules or video probes.
-            if code in SYSTEM_VOLUME_KEYS:
+            # Power, volume and brightness belong to Ubuntu regardless of the
+            # foreground app. Do not run app rules or video probes.
+            if is_system_key(code):
                 ui.write_event(event)
                 continue
 
@@ -258,6 +262,7 @@ async def forward_device(device: InputDevice) -> None:
                 selected = None
                 wps_needs_recovery = False
                 wps_is_focused = False
+                browser_is_focused = None  # cache within one key-down only
                 for rule in rules.candidates(code):
                     if rule.scope == "wps":
                         wps_is_focused = await asyncio.to_thread(wps_presentation_focused)
@@ -279,11 +284,17 @@ async def forward_device(device: InputDevice) -> None:
                             selected = rule
                             break
                         continue
-                    probe = {
-                        "chatgpt": chatgpt_window_focused,
-                        "browser": browser_window_focused,
-                    }[rule.scope]
-                    if await asyncio.to_thread(probe):
+                    if browser_is_focused is None:
+                        browser_is_focused = await asyncio.to_thread(
+                            browser_window_focused)
+                    if not browser_is_focused:
+                        continue
+                    if rule.scope == "browser" or (
+                        rule.scope == "chatgpt" and
+                        await asyncio.to_thread(
+                            chatgpt_window_focused,
+                            browser_already_confirmed=True)
+                    ):
                         selected = rule
                         break
                 if selected is not None:

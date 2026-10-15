@@ -14,6 +14,7 @@ import time
 from evdev import InputDevice, UInput, ecodes, list_devices
 from bleak import BleakClient
 from xiaomi_remote_mic_linux.ble_voice import _resolve_target, scan
+from key_layers import SYSTEM_KEY_CODES
 
 LOG = logging.getLogger("xiaomi-remote-gatt-key-bridge")
 VID, PID = 0x2717, 0x32B8
@@ -28,6 +29,10 @@ CONSUMER_USAGES = {
     0x00E9: ecodes.KEY_VOLUMEUP,
     0x00EA: ecodes.KEY_VOLUMEDOWN,
     0x00E2: ecodes.KEY_MUTE,
+    0x0030: ecodes.KEY_POWER,    # standard HID Consumer power
+    0x0032: ecodes.KEY_SLEEP,    # standard HID Consumer sleep
+    0x006F: ecodes.KEY_BRIGHTNESSUP,
+    0x0070: ecodes.KEY_BRIGHTNESSDOWN,
 }
 # These codes use USB HID Keyboard/Keypad usage page 0x07; RC003 0xF1
 # is observed to be its Back button, though not a standard keyboard usage.
@@ -49,10 +54,13 @@ KEYS = {
     0x7F: ecodes.KEY_MUTE,
     0x80: ecodes.KEY_VOLUMEUP,
     0x81: ecodes.KEY_VOLUMEDOWN,
+    0x66: ecodes.KEY_POWER,  # standard HID Keyboard system power
     0xF1: ecodes.KEY_BACK,
 }
 SHORT_COOLDOWN = {ecodes.KEY_UP, ecodes.KEY_DOWN, ecodes.KEY_LEFT, ecodes.KEY_RIGHT,
-                  ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN}
+                  ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN,
+                  ecodes.KEY_BRIGHTNESSUP, ecodes.KEY_BRIGHTNESSDOWN}
+DANGEROUS_COOLDOWN = frozenset({ecodes.KEY_POWER, ecodes.KEY_SLEEP})
 DEBOUNCE_SECS = 0.18
 ACTION_COOLDOWN_SECS = 0.95
 ACTION_REPEAT_GAP_SECS = 0.7  # repeated down/up packets during a held key
@@ -116,7 +124,8 @@ class KeyTranslator:
             self.ui.write(ecodes.EV_KEY, key, 0)
         new_held = self.held & wanted
         for key in wanted - self.held:
-            minimum = DEBOUNCE_SECS if key in SHORT_COOLDOWN else ACTION_COOLDOWN_SECS
+            minimum = (5.0 if key in DANGEROUS_COOLDOWN else
+                       DEBOUNCE_SECS if key in SHORT_COOLDOWN else ACTION_COOLDOWN_SECS)
             is_burst = (
                 key not in SHORT_COOLDOWN
                 and now - previous_raw[key] < ACTION_REPEAT_GAP_SECS
@@ -178,7 +187,7 @@ async def run_once(address: str):
         # These are advertised capabilities ONLY: unknown usages are never
         # emitted by KeyTranslator, which still uses the strict KEYS allowlist.
         keyboard_capabilities = sorted(set(KEYS.values()) | set(range(1, 129)))
-        ui = UInput({ecodes.EV_KEY: sorted(set(keyboard_capabilities) | set(CONSUMER_USAGES.values()))},
+        ui = UInput({ecodes.EV_KEY: sorted(set(keyboard_capabilities) | SYSTEM_KEY_CODES | set(CONSUMER_USAGES.values()))},
                     name=PROXY_NAME, bustype=ecodes.BUS_BLUETOOTH,
                     vendor=VID, product=PID, version=0x00A4,
                     phys="xiaomi-rc003-gatt-proxy")
