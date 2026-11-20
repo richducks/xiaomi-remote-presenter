@@ -1,0 +1,9 @@
+{
+  "uuid": "xiaomi-wps-ok@local",
+  "name": "Xiaomi Remote GNOME Focus Bridge",
+  "description": "Read-only GNOME compositor focus source for safe Xiaomi remote key routing; replaces the disabled legacy WPS key interceptor.",
+  "shell-version": [
+    "50"
+  ],
+  "version": 2
+}

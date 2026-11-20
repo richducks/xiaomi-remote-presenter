@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -26,6 +27,8 @@ from wps_focus_recovery import (
 
 from video_browser_context import (
     browser_window_focused,
+    _compositor_window,
+    _shell_browser_kind,
     wps_presentation_focused,
     browser_media_tab_focused,
     firefox_pip_focused,
@@ -208,6 +211,29 @@ def ctrl_tap(ui: UInput, key: int) -> None:
     modified_tap(ui, ecodes.KEY_LEFTCTRL, key)
 
 
+def is_proxmox_browser_window(focus: tuple[str, str, str] | None) -> bool:
+    """Require the actual foreground browser and a Proxmox/noVNC title."""
+    if not isinstance(focus, tuple) or len(focus) != 3:
+        return False
+    app_id, wm_class, title = focus
+    return bool(_shell_browser_kind(app_id, wm_class) and
+                re.search(r'\b(?:proxmox|no[\s-]?vnc)\b', title, re.I))
+
+
+def close_browser_tab(ui: UInput) -> None:
+    """Focus browser chrome before closing a Proxmox/noVNC console tab.
+
+    Some embedded consoles consume or redirect key combinations. Ctrl+L
+    gives the browser address bar focus without clicking inside the VM.
+    The caller already verified browser focus; never activate other apps.
+    """
+    if is_proxmox_browser_window(_compositor_window()):
+        ctrl_tap(ui, ecodes.KEY_L)
+        key_sleep(0.10)
+        LOG.info("Proxmox/noVNC TV: browser chrome focused before Ctrl+W")
+    ctrl_tap(ui, ecodes.KEY_W)
+
+
 async def forward_device(device: InputDevice) -> None:
     ui = UInput.from_device(
         device,
@@ -332,6 +358,10 @@ async def forward_device(device: InputDevice) -> None:
                             LOG.info("remote action %s queued=%s", selected.action, ok)
                         elif selected.modifier_code is None:
                             tap(ui, selected.key_code)
+                        elif (selected.scope == "browser" and
+                              selected.modifier_code == ecodes.KEY_LEFTCTRL and
+                              selected.key_code == ecodes.KEY_W):
+                            close_browser_tab(ui)
                         else:
                             modified_tap(ui, selected.modifier_code,
                                          selected.key_code)

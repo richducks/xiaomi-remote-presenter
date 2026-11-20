@@ -166,3 +166,69 @@ class VideoBridgeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ChatGPTWebBridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.bridge=module.Bridge()
+
+    def req(self,data=None,headers=None,cursor="-1",client=""):
+        request=Request(data,headers={"X-Xiaomi-ChatGPT":"1",**(headers or {})},cursor=cursor)
+        request.query["client"]=client
+        return request
+
+    async def test_remote_action_requires_focused_chatgpt_userscript(self):
+        import json
+        b=self.bridge
+        out=await b.chatgpt_trigger(self.req({"action":"send"},headers={"X-Xiaomi-Remote-HID":"1"}))
+        self.assertEqual(out.status,409)
+        await b.chatgpt_heartbeat(self.req({"id":"main-chatgpt-tab","url":"https://chatgpt.com","visible":True,"focused":True,"version":2}))
+        out=await b.chatgpt_trigger(self.req({"action":"send"},headers={"X-Xiaomi-Remote-HID":"1"}))
+        self.assertEqual(out.status,200)
+        self.assertEqual(json.loads(out.text)["action"],"send")
+        stream=await b.next_events(self.req(cursor="0",client="main-chatgpt-tab"))
+        self.assertEqual([x["type"] for x in json.loads(stream.text)["events"]],["send"])
+        self.assertEqual(json.loads((await b.chatgpt_active(self.req())).text)["active"],True)
+
+    async def test_only_focused_v3_client_with_draft_enables_ok(self):
+        import json
+        b=self.bridge
+        data={"id":"my-chatgpt-tab","url":"https://chatgpt.com",
+              "visible":True,"focused":True,"version":3,"draftReady":True}
+        def ready():
+            return b.chatgpt_draft_ready(self.req())
+        self.assertFalse(json.loads((await ready()).text)["ready"])
+        await b.chatgpt_heartbeat(self.req({**data,"version":2}))
+        self.assertFalse(json.loads((await ready()).text)["ready"],
+                         "old v0.5 scripts must not enable draft OK")
+        await b.chatgpt_heartbeat(self.req(data))
+        self.assertTrue(json.loads((await ready()).text)["ready"])
+        await b.chatgpt_heartbeat(self.req({**data,"draftReady":False}))
+        self.assertFalse(json.loads((await ready()).text)["ready"])
+        await b.chatgpt_heartbeat(self.req({**data,"focused":False}))
+        self.assertFalse(json.loads((await ready()).text)["ready"])
+
+    async def test_rejects_untrusted_origin_and_unsupported_commands(self):
+        b=self.bridge
+        self.assertEqual((await b.chatgpt_heartbeat(self.req({"id":"main-chatgpt-tab","url":"https://evil.example","version":2}))).status,400)
+        self.assertEqual((await b.chatgpt_heartbeat(self.req({"id":"main-chatgpt-tab","url":"https://chatgpt.com","version":2},headers={"Origin":"https://evil.example"}))).status,403)
+        for d in ({"action":"rm -rf /"},{"action":"send"}):
+            self.assertEqual((await b.chatgpt_trigger(self.req(d))).status,403)
+        self.assertEqual((await b.chatgpt_trigger(self.req({"action":"run"},headers={"X-Xiaomi-Remote-HID":"1"}))).status,400)
+
+    async def test_background_and_legacy_clients_are_not_active(self):
+        import json
+        b=self.bridge
+        for client in [
+            {"id":"background-tab","url":"https://chatgpt.com","visible":False,"focused":False,"version":2},
+            {"id":"old-version","url":"https://chatgpt.com","visible":True,"focused":True,"version":1},
+        ]:
+            self.assertEqual((await b.chatgpt_heartbeat(self.req(client))).status,200)
+        self.assertFalse(json.loads((await b.chatgpt_active(self.req())).text)["active"])
+        self.assertEqual((await b.chatgpt_trigger(self.req({"action":"new_chat"},headers={"X-Xiaomi-Remote-HID":"1"}))).status,409)
+
+    async def test_two_focused_tabs_do_not_receive_ambiguous_actions(self):
+        b=self.bridge
+        for cid in ("chatgpt-tab-1","chatgpt-tab-2"):
+            await b.chatgpt_heartbeat(self.req({"id":cid,"url":"https://chatgpt.com","visible":True,"focused":True,"version":2}))
+        self.assertEqual((await b.chatgpt_trigger(self.req({"action":"send"},headers={"X-Xiaomi-Remote-HID":"1"}))).status,409)

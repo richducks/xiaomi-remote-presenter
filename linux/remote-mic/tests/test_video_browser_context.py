@@ -10,6 +10,47 @@ spec.loader.exec_module(ctx)
 
 
 class VideoBrowserContextTests(unittest.TestCase):
+    def setUp(self):
+        # Existing AT-SPI tests must not depend on the host's enabled GNOME
+        # focus bridge; each compositor test supplies its own deliberate data.
+        stub = patch.object(ctx, '_compositor_window', return_value=None)
+        stub.start()
+        self.addCleanup(stub.stop)
+
+    def test_compositor_focus_is_authoritative_over_stale_accessibility(self):
+        with patch.object(ctx, '_compositor_window',
+                          return_value=('firefox_firefox.desktop',
+                                        'firefox_firefox',
+                                        '夸克网盘 — Mozilla Firefox')):
+            self.assertTrue(ctx.browser_window_focused())
+            self.assertFalse(ctx.wps_presentation_focused())
+            self.assertEqual(ctx.active_browser_window(None,None),
+                             ('firefox','夸克网盘 — Mozilla Firefox'))
+        with patch.object(ctx, '_compositor_window',
+                          return_value=('wechat.desktop','wechat','Firefox website')):
+            self.assertFalse(ctx.browser_window_focused())
+            self.assertFalse(ctx.wps_presentation_focused())
+            self.assertIsNone(ctx.active_browser_window(None,None))
+        with patch.object(ctx, '_compositor_window',
+                          return_value=('','','')):
+            # Compositor returning "no window" is not a signal to trust
+            # old AT-SPI ACTIVE frames again.
+            self.assertFalse(ctx.browser_window_focused())
+            self.assertIsNone(ctx.active_browser_window(None,None))
+
+    def test_compositor_wps_only_presentation_and_not_writer(self):
+        with patch.object(ctx, '_compositor_window',
+                          return_value=('wps-office-wpp.desktop','wpp','Untitled')):
+            self.assertTrue(ctx.wps_presentation_focused())
+            self.assertFalse(ctx.browser_window_focused())
+        for name,title in [('wps-office-et.desktop','Budget.xlsx'),
+                           ('wps-office-wps.desktop','Report.docx'),
+                           ('org.gnome.Terminal.desktop','Sales.pptx')]:
+            with self.subTest(app=name):
+                with patch.object(ctx, '_compositor_window',
+                                  return_value=(name,name,title)):
+                    self.assertFalse(ctx.wps_presentation_focused())
+
     def test_playing_video_title_matches_current_browser_tab(self):
         self.assertTrue(ctx.media_title_matches_window(
             "夸克网盘 - 正在播放音频 - Google Chrome", "夸克网盘", "Playing"))
@@ -71,6 +112,55 @@ class VideoBrowserContextTests(unittest.TestCase):
             self.assertTrue(ctx.wps_presentation_focused())
             self.assertFalse(ctx.browser_window_focused())
 
+    def test_stale_active_flags_use_unique_keyboard_focus(self):
+        import sys
+        from unittest.mock import patch
+        atspi=MagicMock()
+        atspi.StateType.ACTIVE=11
+        atspi.StateType.FOCUSED=12
+
+        def fake_app(name, title, focused):
+            frame=MagicMock()
+            frame.get_role_name.return_value='frame'
+            frame.get_name.return_value=title
+            frame.get_state_set.return_value.contains.side_effect=(
+                lambda state: state == atspi.StateType.ACTIVE
+            )
+            child=MagicMock()
+            child.get_state_set.return_value.contains.side_effect=(
+                lambda state: focused and state == atspi.StateType.FOCUSED
+            )
+            child.get_child_count.return_value=0
+            frame.get_child_count.return_value=1
+            frame.get_child_at_index.return_value=child
+            app=MagicMock()
+            app.get_name.return_value=name
+            app.get_child_count.return_value=1
+            app.get_child_at_index.return_value=frame
+            return app
+
+        apps=[fake_app('Firefox','Video - Firefox',False),
+              fake_app('wechat','WeChat',True)]
+        desktop=MagicMock()
+        desktop.get_child_count.return_value=2
+        desktop.get_child_at_index.side_effect=lambda i: apps[i]
+        atspi.get_desktop.return_value=desktop
+        gi=MagicMock()
+        gi.repository.Atspi=atspi
+        with patch.dict(sys.modules,{'gi':gi,'gi.repository':gi.repository}):
+            # A stale Firefox ACTIVE flag MUST NOT send Ctrl+W to WeChat.
+            self.assertFalse(ctx.browser_window_focused())
+            self.assertIsNone(ctx.active_browser_window(desktop,atspi))
+            apps[0]=fake_app('WPS Office','deck.pptx - WPS Office',True)
+            apps[1]=fake_app('Firefox','Video - Firefox',False)
+            self.assertTrue(ctx.wps_presentation_focused())
+            self.assertFalse(ctx.browser_window_focused())
+            apps[0]=fake_app('Firefox','Video - Firefox',True)
+            apps[1]=fake_app('wechat','WeChat',False)
+            self.assertTrue(ctx.browser_window_focused())
+            self.assertEqual(ctx.active_browser_window(desktop,atspi),
+                             ('firefox','Video - Firefox'))
+
     def test_home_close_supported_standalone_browsers(self):
         for app in (
             "Firefox", "Mozilla Firefox", "Firefox Nightly",
@@ -106,8 +196,7 @@ class VideoBrowserContextTests(unittest.TestCase):
         gi=MagicMock()
         gi.repository.Atspi=atspi
         atspi.get_desktop.return_value=desktop
-        with patch.dict(sys.modules,{"gi":gi,"gi.repository":gi.repository}),\
-             patch.object(ctx,"_compositor_window",return_value=None):
+        with patch.dict(sys.modules,{"gi":gi,"gi.repository":gi.repository}):
             self.assertTrue(ctx.browser_window_focused())
             active.get_state_set.return_value.contains.return_value=False
             self.assertFalse(ctx.browser_window_focused())
@@ -210,11 +299,10 @@ class VideoBrowserContextTests(unittest.TestCase):
         desktop = MagicMock()
         desktop.get_child_count.return_value = 1
         desktop.get_child_at_index.return_value = app
-        with patch.object(ctx,"_compositor_window",return_value=None):
-            self.assertEqual(ctx.active_browser_window(desktop, atspi),
-                             ("firefox", "Video - Firefox"))
-            frame.get_state_set.return_value.contains.return_value = False
-            self.assertIsNone(ctx.active_browser_window(desktop, atspi))
+        self.assertEqual(ctx.active_browser_window(desktop, atspi),
+                         ("firefox", "Video - Firefox"))
+        frame.get_state_set.return_value.contains.return_value = False
+        self.assertIsNone(ctx.active_browser_window(desktop, atspi))
 
 
 if __name__ == "__main__":

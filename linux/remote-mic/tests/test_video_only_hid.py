@@ -72,12 +72,58 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
              patch.object(video, "toggle_browser_play_pause", return_value=mpris), \
              patch.object(video, "youtube_video_tab_focused", return_value=youtube), \
              patch.object(video, "browser_window_focused", return_value=browser_focused), \
+             patch.object(video, "chatgpt_window_focused", return_value=False), \
              patch.object(video, "wps_presentation_focused", return_value=wps_focused):
             await video.forward_device(dev)
         self.assertFalse(dev.grabbed)
         self.assertTrue(dev.closed)
         self.assertTrue(ui.closed)
         return ui
+
+    def test_proxmox_close_focus_handoff_and_no_guest_keystrokes(self):
+        ui = FakeUInput()
+        with patch.object(video, '_compositor_window', return_value=(
+                'firefox.desktop', 'firefox', 'Proxmox Virtual Environment')), \
+             patch.object(video, 'key_sleep') as delay:
+            video.close_browser_tab(ui)
+        self.assertEqual([v for _, v, down in ui.written if down == 1],
+                         [ecodes.KEY_LEFTCTRL, ecodes.KEY_L,
+                          ecodes.KEY_LEFTCTRL, ecodes.KEY_W])
+        self.assertEqual([v for _, v, down in ui.written if down == 0],
+                         [ecodes.KEY_L, ecodes.KEY_LEFTCTRL,
+                          ecodes.KEY_W, ecodes.KEY_LEFTCTRL])
+        self.assertEqual(ui.syn_count, 4)
+        self.assertIn(0.10, [call.args[0] for call in delay.call_args_list])
+        for focus in [('firefox.desktop', 'firefox', 'ChatGPT'),
+                      ('nautilus.desktop', 'nautilus', 'Proxmox Virtual Environment'), None]:
+            self.assertFalse(video.is_proxmox_browser_window(focus))
+            ui = FakeUInput()
+            with patch.object(video, '_compositor_window', return_value=focus):
+                video.close_browser_tab(ui)
+            self.assertEqual([v for _, v, down in ui.written if down == 1],
+                             [ecodes.KEY_LEFTCTRL, ecodes.KEY_W])
+
+    def test_synthetic_taps_have_dwell_and_balanced_release(self):
+        # Physical Enter is forwarded in the event loop; only synthesized
+        # actions use this delay.
+        ui=FakeUInput()
+        with patch.object(video, 'key_sleep') as wait:
+            video.modified_tap(ui, ecodes.KEY_LEFTCTRL, ecodes.KEY_TAB)
+            wait.assert_called_once_with(0.060)
+        self.assertEqual(ui.written, [
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1),
+            (ecodes.EV_KEY, ecodes.KEY_TAB, 1),
+            (ecodes.EV_KEY, ecodes.KEY_TAB, 0),
+            (ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)])
+        self.assertEqual(ui.syn_count,2)
+        ui=FakeUInput()
+        with patch.object(video,'key_sleep') as wait:
+            video.tap(ui,ecodes.KEY_F5)
+            wait.assert_called_once_with(0.035)
+        self.assertEqual(ui.written,[
+            (ecodes.EV_KEY,ecodes.KEY_F5,1),
+            (ecodes.EV_KEY,ecodes.KEY_F5,0)])
+        self.assertEqual(ui.syn_count,2)
 
     async def test_normal_enter_physical_down_repeat_up_untouched(self):
         keys = [(ecodes.KEY_ENTER, 1),(ecodes.KEY_ENTER, 2),
@@ -98,6 +144,44 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
         ui = await self.run_remote(keys)
         self.assertEqual(ui.forwarded, keys)
         self.assertEqual(ui.written, [])
+
+    async def test_directional_left_right_preserve_hold_repeat_release_in_every_context(self):
+        keys = [(code, value)
+                for code in (ecodes.KEY_LEFT, ecodes.KEY_RIGHT)
+                for value in (1, 2, 2, 0)]
+        for context in ({}, {"browser_focused": True},
+                        {"video_tab": True}, {"pip": True, "helper": True},
+                        {"wps_focused": True}, {"mpris": True}):
+            with self.subTest(context=context):
+                ui = await self.run_remote(keys, **context)
+                self.assertEqual(ui.forwarded, keys)
+                self.assertEqual(ui.written, [])
+
+    async def test_system_volume_keeps_physical_repeat_in_all_contexts(self):
+        # GNOME handles these actual volume/mute events. Never map them to
+        # Global Speed or a web action, even with a video at the front.
+        keys = [(code, value)
+                for code in (ecodes.KEY_VOLUMEUP, ecodes.KEY_VOLUMEDOWN,
+                             ecodes.KEY_MUTE)
+                for value in (1, 2, 2, 0)]
+        for context in ({}, {"browser_focused": True},
+                        {"video_tab": True}, {"wps_focused": True},
+                        {"pip": True, "helper": True}, {"mpris": True}):
+            with self.subTest(context=context):
+                ui = await self.run_remote(keys, **context)
+                self.assertEqual(ui.forwarded, keys)
+                self.assertEqual(ui.written, [])
+
+    async def test_nonvideo_vertical_arrows_preserve_repeat_and_enter_is_unaffected(self):
+        keys = [(code, value)
+                for code in (ecodes.KEY_UP, ecodes.KEY_DOWN)
+                for value in (1, 2, 0)]
+        keys += [(ecodes.KEY_ENTER, 1), (ecodes.KEY_ENTER, 0)]
+        for context in ({}, {"browser_focused": True}):
+            with self.subTest(context=context):
+                ui = await self.run_remote(keys, **context)
+                self.assertEqual(ui.forwarded, keys)
+                self.assertEqual(ui.written, [])
 
     async def test_browser_home_opens_one_tab_even_if_held(self):
         keys = [(ecodes.KEY_HOME,1),(ecodes.KEY_HOME,2),
@@ -165,6 +249,7 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
               (ecodes.KEY_GRAVE,0)]
         dev=FakeRemote(keys); ui=FakeUInput()
         with patch.object(video.UInput,"from_device",return_value=ui), \
+             patch.object(video,"chatgpt_window_focused",return_value=False), \
              patch.object(video,"browser_window_focused",
                           side_effect=[True,False]) as focus:
             await video.forward_device(dev)
@@ -327,6 +412,33 @@ class VideoOnlyIsolationTests(unittest.IsolatedAsyncioTestCase):
         keys=[(ecodes.KEY_ENTER,1),(ecodes.KEY_ENTER,2),(ecodes.KEY_ENTER,0),
               (ecodes.KEY_BACK,1),(ecodes.KEY_BACK,0)]
         ui=await self.run_remote(keys)
+        self.assertEqual(ui.forwarded,keys)
+        self.assertEqual(ui.written,[])
+
+    async def test_chatgpt_reviewed_draft_ok_sends_once_without_physical_enter(self):
+        keys=[(ecodes.KEY_ENTER,v) for v in (1,2,0,1,0)]
+        dev=FakeRemote(keys)
+        ui=FakeUInput()
+        actions=[]
+        with patch.object(video.UInput,"from_device",return_value=ui), \
+             patch.object(video,"chatgpt_draft_ready",return_value=True), \
+             patch.object(video,"emit_chatgpt_action",side_effect=lambda x: actions.append(x) or True), \
+             patch.object(video,"time",SimpleNamespace(monotonic=lambda: 1.0)):
+            await video.forward_device(dev)
+        self.assertEqual(actions,["send"])
+        self.assertEqual(ui.forwarded,[])
+        self.assertEqual(ui.written,[])
+
+    async def test_chatgpt_no_draft_ok_keeps_native_enter(self):
+        keys=[(ecodes.KEY_ENTER,v) for v in (1,2,0)]
+        dev=FakeRemote(keys)
+        ui=FakeUInput()
+        with patch.object(video.UInput,"from_device",return_value=ui), \
+             patch.object(video,"chatgpt_draft_ready",return_value=False), \
+             patch.object(video,"toggle_browser_play_pause",return_value=False), \
+             patch.object(video,"youtube_video_tab_focused",return_value=False), \
+             patch.object(video,"emit_chatgpt_action",side_effect=AssertionError("must not send")):
+            await video.forward_device(dev)
         self.assertEqual(ui.forwarded,keys)
         self.assertEqual(ui.written,[])
 
